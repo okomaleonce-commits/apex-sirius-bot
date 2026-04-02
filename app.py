@@ -31,7 +31,23 @@ ALLOWED_LEAGUES = {
     "World Cup", "Friendlies"
 }
 
-# ====================== FONCTIONS DU BOT (identiques) ======================
+# ====================== NOUVEAU : BLESSURES ======================
+def get_injuries(fixture_id):
+    """Récupère les blessures pour le match"""
+    url = f"{BASE_URL}/injuries?fixture={fixture_id}"
+    data = safe_api_call(url)
+    if not data or not data.get('response'):
+        return "✅ Aucune blessure signalée"
+    
+    injuries = data['response']
+    home_inj = [p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('home', {}).get('id')]
+    away_inj = [p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('away', {}).get('id')]
+    
+    home_text = f"Home: {len(home_inj)} blessé(s)" if home_inj else "Home: OK"
+    away_text = f"Away: {len(away_inj)} blessé(s)" if away_inj else "Away: OK"
+    return f"🩹 {home_text} | {away_text}"
+
+# ====================== FONCTIONS EXISTANTES ======================
 def safe_api_call(url, retries=3):
     for i in range(retries):
         try:
@@ -62,12 +78,6 @@ def envoyer_notification(message, fixture_id):
         print(f"✅ Notification envoyée → {fixture_id}")
     except Exception as e:
         print(f"❌ Telegram erreur : {e}")
-
-def envoyer_notification_simple(message):
-    try:
-        bot.send_message(CHAT_ID, message)
-    except:
-        pass
 
 def get_fixtures(live=False):
     if live:
@@ -109,35 +119,40 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
             for bet_group in bm['bets']:
                 bet_name = bet_group['name']
                 values_list = bet_group['values']
+                
+                # 1X2
                 if bet_name == "Match Winner":
                     pred_home = float(prediction['predictions']['home']) / 100
                     pred_draw = float(prediction['predictions']['draw']) / 100
                     pred_away = float(prediction['predictions']['away']) / 100
                     for v in values_list:
                         odd = float(v['odd'])
-                        if odd <= 1.01: continue
+                        if odd <= 1.40: continue          # ← FILTRAGE COTE > 1.40
                         implied = 1 / odd
                         edge = 0.05
                         if v['value'] == 'Home' and pred_home > implied + edge:
                             values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs {odd} (edge {(pred_home-implied)*100:.1f}%)")
-                        # (les autres conditions Draw / Away / Over 2.5 / BTTS restent identiques)
                         elif v['value'] == 'Draw' and pred_draw > implied + edge:
                             values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs {odd} (edge {(pred_draw-implied)*100:.1f}%)")
                         elif v['value'] == 'Away' and pred_away > implied + edge:
                             values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge {(pred_away-implied)*100:.1f}%)")
+                
+                # OVER 2.5
                 elif bet_name == "Over/Under" and any(v['value'] == 'Over 2.5' for v in values_list):
                     for v in values_list:
                         if v['value'] == 'Over 2.5':
                             odd = float(v['odd'])
-                            if odd <= 1.01: continue
+                            if odd <= 1.40: continue
                             implied = 1 / odd
                             if 0.55 > implied + 0.05:
                                 values.append(f"🔥 OVER 2.5 VALUE : 55.0% vs {odd} (edge {(0.55-implied)*100:.1f}%)")
+                
+                # BTTS
                 elif bet_name == "Both Teams To Score":
                     for v in values_list:
                         if v['value'] == 'Yes':
                             odd = float(v['odd'])
-                            if odd <= 1.01: continue
+                            if odd <= 1.40: continue
                             implied = 1 / odd
                             if 0.52 > implied + 0.05:
                                 values.append(f"🤝 BTTS YES VALUE : 52.0% vs {odd} (edge {(0.52-implied)*100:.1f}%)")
@@ -146,9 +161,9 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
     return "\n".join(values) if values else None
 
 def check_value_bets():
-    print("🔍 Analyse des matchs (toutes ligues demandées)...")
-    # (le reste de la fonction reste exactement le même que dans la version précédente)
-
+    print("🔍 Analyse des matchs (toutes ligues + cote ≥ 1.40)...")
+    
+    # Pré-match
     fixtures = get_fixtures(live=False)
     for fixture in fixtures:
         fid = fixture['fixture']['id']
@@ -158,11 +173,14 @@ def check_value_bets():
         odds = get_odds(fid)
         value_msg = calcul_value_bet(odds, pred, fid)
         if value_msg:
+            # Récupération blessures + forme
+            injuries = get_injuries(fid)
             league = fixture['league']['name']
             match = f"{fixture['teams']['home']['name']} vs {fixture['teams']['away']['name']}"
-            msg = f"🚨 VALUE BET (Pré-match)\n\n{league}\n{match}\n{value_msg}\n\n📅 {fixture['fixture']['date'][:16]}"
+            msg = f"🚨 VALUE BET (Pré-match)\n\n{league}\n{match}\n{value_msg}\n\n{injuries}\n📅 {fixture['fixture']['date'][:16]}"
             envoyer_notification(msg, fid)
     
+    # Live
     live_fixtures = get_fixtures(live=True)
     for fixture in live_fixtures:
         fid = fixture['fixture']['id']
@@ -172,10 +190,11 @@ def check_value_bets():
         odds = get_odds(fid)
         value_msg = calcul_value_bet(odds, pred, fid)
         if value_msg:
+            injuries = get_injuries(fid)
             league = fixture['league']['name']
             match = f"{fixture['teams']['home']['name']} vs {fixture['teams']['away']['name']}"
             score = f"{fixture.get('goals', {}).get('home', '?')}-{fixture.get('goals', {}).get('away', '?')}"
-            msg = f"🔴 VALUE BET LIVE\n\n{league}\n{match} ({score})\n{value_msg}"
+            msg = f"🔴 VALUE BET LIVE\n\n{league}\n{match} ({score})\n{value_msg}\n\n{injuries}"
             envoyer_notification(msg, fid)
 
 # ====================== FLASK ======================
@@ -189,22 +208,19 @@ def home():
 def ping():
     return "pong", 200
 
-# ====================== SCHEDULER (CORRIGÉ POUR RENDER) ======================
+# ====================== SCHEDULER ======================
 scheduler_started = False
-
 def start_scheduler():
     global scheduler_started
-    if scheduler_started:
-        return
+    if scheduler_started: return
     scheduler_started = True
     print("🤖 Scheduler APEX-SIRIUS démarré en arrière-plan (Render mode)...")
     schedule.every(5).minutes.do(check_value_bets)
-    check_value_bets()  # premier check immédiat
+    check_value_bets()
     while True:
         schedule.run_pending()
         time.sleep(1)
 
-# Démarrage du scheduler AU NIVEAU MODULE (obligatoire pour Gunicorn/Render)
 threading.Thread(target=start_scheduler, daemon=True).start()
 print("✅ Thread scheduler lancé")
 
