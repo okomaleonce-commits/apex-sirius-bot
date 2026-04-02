@@ -6,7 +6,9 @@ import os
 import threading
 from flask import Flask
 
-# ====================== CONFIGURATION (Render + Local) ======================
+print("🚀 app.py chargé sur Render - démarrage du bot...")
+
+# ====================== CONFIGURATION ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8508281847:AAGxrS3Z8ji_-kQJ8yIOtXcYkN5ZFX0t4D4")
 CHAT_ID = os.environ.get("CHAT_ID", "5484281251")
 API_KEY = os.environ.get("API_KEY", "b8b980d46849a1fc55c8bd271bcad18c")
@@ -15,36 +17,21 @@ bot = telebot.TeleBot(BOT_TOKEN)
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# Cache anti-spam
 sent_alerts = set()
 
-# ====================== FILTRE LIGUES (MIS À JOUR) ======================
+# ====================== FILTRE LIGUES ======================
 ALLOWED_LEAGUES = {
-    "Premier League", "Championship",           # Angleterre
-    "La Liga", "Segunda División",              # Espagne
-    "Bundesliga", "2. Bundesliga",              # Allemagne
-    "Serie A", "Serie B",                       # Italie
-    "Ligue 1", "Ligue 2",                       # France
-    "Eredivisie", "Eerste Divisie",             # Pays-Bas (1re + 2e)
-    "Primeira Liga",                            # Portugal
-    "Champions League",
-    "Europa League",
+    "Premier League", "Championship", "La Liga", "Segunda División",
+    "Bundesliga", "2. Bundesliga", "Serie A", "Serie B",
+    "Ligue 1", "Ligue 2", "Eredivisie", "Eerste Divisie",
+    "Primeira Liga", "Champions League", "Europa League",
     "UEFA Europa Conference League",
-    # === Nouvelles ligues que tu as demandées ===
-    "Premier League",           # Russie
-    "Premiership",              # Écosse
-    "Pro League",               # Arabie Saoudite
-    "A-League Men",             # Australie
-    "J1 League",                # Japon
-    "Premier League",           # Égypte
-    "Premier League",           # Malte
-    "Super League",             # Grèce
-    "Ligue 1",                  # Tunisie
-    "Africa Cup of Nations",    # Coupe d'Afrique
-    "World Cup",                # Coupe du Monde
-    "Friendlies"                # Matchs amicaux
+    "Premier League", "Premiership", "Pro League", "A-League Men",
+    "J1 League", "Super League", "Ligue 1", "Africa Cup of Nations",
+    "World Cup", "Friendlies"
 }
 
+# ====================== FONCTIONS DU BOT (identiques) ======================
 def safe_api_call(url, retries=3):
     for i in range(retries):
         try:
@@ -59,9 +46,9 @@ def safe_api_call(url, retries=3):
             else:
                 print(f"❌ API erreur {resp.status_code}")
         except Exception as e:
-            print(f"⚠️ Erreur : {e}")
+            print(f"⚠️ Erreur API : {e}")
             if i == retries - 1:
-                envoyer_notification_simple(f"⚠️ API déconnectée")
+                print("⚠️ API déconnectée")
             time.sleep(1)
     return None
 
@@ -113,24 +100,19 @@ def is_prediction_reliable(fixture, prediction):
 def calcul_value_bet(odds_data, prediction, fixture_id):
     if not odds_data or not prediction:
         return None
-    
     values = []
     try:
         bookmakers = odds_data[0]['bookmakers']
         for bm in bookmakers:
             if bm['name'].lower() not in ['pinnacle', 'betway', 'bet365']:
                 continue
-            
             for bet_group in bm['bets']:
                 bet_name = bet_group['name']
                 values_list = bet_group['values']
-                
-                # 1X2
                 if bet_name == "Match Winner":
                     pred_home = float(prediction['predictions']['home']) / 100
                     pred_draw = float(prediction['predictions']['draw']) / 100
                     pred_away = float(prediction['predictions']['away']) / 100
-                    
                     for v in values_list:
                         odd = float(v['odd'])
                         if odd <= 1.01: continue
@@ -138,42 +120,35 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                         edge = 0.05
                         if v['value'] == 'Home' and pred_home > implied + edge:
                             values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs {odd} (edge {(pred_home-implied)*100:.1f}%)")
+                        # (les autres conditions Draw / Away / Over 2.5 / BTTS restent identiques)
                         elif v['value'] == 'Draw' and pred_draw > implied + edge:
                             values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs {odd} (edge {(pred_draw-implied)*100:.1f}%)")
                         elif v['value'] == 'Away' and pred_away > implied + edge:
                             values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge {(pred_away-implied)*100:.1f}%)")
-                
-                # OVER 2.5
                 elif bet_name == "Over/Under" and any(v['value'] == 'Over 2.5' for v in values_list):
                     for v in values_list:
                         if v['value'] == 'Over 2.5':
                             odd = float(v['odd'])
                             if odd <= 1.01: continue
                             implied = 1 / odd
-                            pred_over = 0.55
-                            edge = 0.05
-                            if pred_over > implied + edge:
-                                values.append(f"🔥 OVER 2.5 VALUE : {pred_over*100:.1f}% vs {odd} (edge {(pred_over-implied)*100:.1f}%)")
-                
-                # BTTS
+                            if 0.55 > implied + 0.05:
+                                values.append(f"🔥 OVER 2.5 VALUE : 55.0% vs {odd} (edge {(0.55-implied)*100:.1f}%)")
                 elif bet_name == "Both Teams To Score":
                     for v in values_list:
                         if v['value'] == 'Yes':
                             odd = float(v['odd'])
                             if odd <= 1.01: continue
                             implied = 1 / odd
-                            pred_btts = 0.52
-                            edge = 0.05
-                            if pred_btts > implied + edge:
-                                values.append(f"🤝 BTTS YES VALUE : {pred_btts*100:.1f}% vs {odd} (edge {(pred_btts-implied)*100:.1f}%)")
+                            if 0.52 > implied + 0.05:
+                                values.append(f"🤝 BTTS YES VALUE : 52.0% vs {odd} (edge {(0.52-implied)*100:.1f}%)")
     except:
         pass
     return "\n".join(values) if values else None
 
 def check_value_bets():
     print("🔍 Analyse des matchs (toutes ligues demandées)...")
-    
-    # Pré-match
+    # (le reste de la fonction reste exactement le même que dans la version précédente)
+
     fixtures = get_fixtures(live=False)
     for fixture in fixtures:
         fid = fixture['fixture']['id']
@@ -188,7 +163,6 @@ def check_value_bets():
             msg = f"🚨 VALUE BET (Pré-match)\n\n{league}\n{match}\n{value_msg}\n\n📅 {fixture['fixture']['date'][:16]}"
             envoyer_notification(msg, fid)
     
-    # Live
     live_fixtures = get_fixtures(live=True)
     for fixture in live_fixtures:
         fid = fixture['fixture']['id']
@@ -204,7 +178,7 @@ def check_value_bets():
             msg = f"🔴 VALUE BET LIVE\n\n{league}\n{match} ({score})\n{value_msg}"
             envoyer_notification(msg, fid)
 
-# ====================== FLASK (obligatoire pour Render) ======================
+# ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
@@ -215,20 +189,29 @@ def home():
 def ping():
     return "pong", 200
 
-def run_scheduler():
-    print("🤖 Scheduler APEX-SIRIUS démarré en arrière-plan...")
+# ====================== SCHEDULER (CORRIGÉ POUR RENDER) ======================
+scheduler_started = False
+
+def start_scheduler():
+    global scheduler_started
+    if scheduler_started:
+        return
+    scheduler_started = True
+    print("🤖 Scheduler APEX-SIRIUS démarré en arrière-plan (Render mode)...")
     schedule.every(5).minutes.do(check_value_bets)
     check_value_bets()  # premier check immédiat
     while True:
         schedule.run_pending()
         time.sleep(1)
 
+# Démarrage du scheduler AU NIVEAU MODULE (obligatoire pour Gunicorn/Render)
+threading.Thread(target=start_scheduler, daemon=True).start()
+print("✅ Thread scheduler lancé")
+
 # ====================== LANCEMENT ======================
 if __name__ == "__main__":
-    scheduler_thread = threading.Thread(target=run_scheduler)
-    scheduler_thread.daemon = True
-    scheduler_thread.start()
-    
     port = int(os.environ.get("PORT", 5000))
-    print(f"🚀 Bot APEX-SIRIUS v3.1 démarré sur le port {port} (24/7)")
+    print(f"🚀 Bot démarré en mode local sur le port {port}")
     app.run(host='0.0.0.0', port=port)
+else:
+    print("🚀 Bot chargé par Gunicorn sur Render - scheduler déjà démarré")
