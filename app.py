@@ -10,7 +10,7 @@ from datetime import datetime
 print("🚀 app.py chargé sur Render - démarrage du bot...")
 
 # ====================== CONFIGURATION ======================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8508281847:AAGxrS3Z8ji_-kQJ8yIOtXcYkN5ZFX0t4D4")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8508281847:AAGT8rQ8iA_tA1gx5n0SWYHMp7znD-CXjCE")
 CHAT_ID = os.environ.get("CHAT_ID", "5484281251")
 API_KEY = os.environ.get("API_KEY", "b8b980d46849a1fc55c8bd271bcad18c")
 
