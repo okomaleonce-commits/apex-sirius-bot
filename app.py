@@ -4,7 +4,8 @@ import time
 import schedule
 import os
 import threading
-from flask import Flask
+from flask import Flask, render_template_string
+from datetime import datetime
 
 print("🚀 app.py chargé sur Render - démarrage du bot...")
 
@@ -18,6 +19,7 @@ BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
 sent_alerts = set()
+value_bets_history = []  # ← Stocke les value bets pour le dashboard (30 derniers)
 
 # ====================== FILTRE LIGUES ======================
 ALLOWED_LEAGUES = {
@@ -31,23 +33,18 @@ ALLOWED_LEAGUES = {
     "World Cup", "Friendlies"
 }
 
-# ====================== NOUVEAU : BLESSURES ======================
+# ====================== BLESSURES ======================
 def get_injuries(fixture_id):
-    """Récupère les blessures pour le match"""
     url = f"{BASE_URL}/injuries?fixture={fixture_id}"
     data = safe_api_call(url)
     if not data or not data.get('response'):
         return "✅ Aucune blessure signalée"
-    
     injuries = data['response']
-    home_inj = [p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('home', {}).get('id')]
-    away_inj = [p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('away', {}).get('id')]
-    
-    home_text = f"Home: {len(home_inj)} blessé(s)" if home_inj else "Home: OK"
-    away_text = f"Away: {len(away_inj)} blessé(s)" if away_inj else "Away: OK"
-    return f"🩹 {home_text} | {away_text}"
+    home_inj = len([p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('home', {}).get('id')])
+    away_inj = len([p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('away', {}).get('id')])
+    return f"🩹 Home: {home_inj} | Away: {away_inj}"
 
-# ====================== FONCTIONS EXISTANTES ======================
+# ====================== FONCTIONS ======================
 def safe_api_call(url, retries=3):
     for i in range(retries):
         try:
@@ -75,9 +72,17 @@ def envoyer_notification(message, fixture_id):
     sent_alerts.add(alert_key)
     try:
         bot.send_message(CHAT_ID, message)
-        print(f"✅ Notification envoyée → {fixture_id}")
+        print(f"✅ Notification Telegram envoyée → {fixture_id}")
     except Exception as e:
         print(f"❌ Telegram erreur : {e}")
+
+    # Ajout au dashboard
+    value_bets_history.append({
+        "time": datetime.now().strftime("%H:%M"),
+        "message": message
+    })
+    if len(value_bets_history) > 30:
+        value_bets_history.pop(0)
 
 def get_fixtures(live=False):
     if live:
@@ -119,15 +124,15 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
             for bet_group in bm['bets']:
                 bet_name = bet_group['name']
                 values_list = bet_group['values']
-                
-                # 1X2
+
+                # 1X2, Double Chance, Asian Handicap, Over 2.5, BTTS (identique à la version précédente)
                 if bet_name == "Match Winner":
                     pred_home = float(prediction['predictions']['home']) / 100
                     pred_draw = float(prediction['predictions']['draw']) / 100
                     pred_away = float(prediction['predictions']['away']) / 100
                     for v in values_list:
                         odd = float(v['odd'])
-                        if odd <= 1.40: continue          # ← FILTRAGE COTE > 1.40
+                        if odd <= 1.40: continue
                         implied = 1 / odd
                         edge = 0.05
                         if v['value'] == 'Home' and pred_home > implied + edge:
@@ -136,8 +141,31 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                             values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs {odd} (edge {(pred_draw-implied)*100:.1f}%)")
                         elif v['value'] == 'Away' and pred_away > implied + edge:
                             values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge {(pred_away-implied)*100:.1f}%)")
-                
-                # OVER 2.5
+
+                elif bet_name == "Double Chance":
+                    pred_home = float(prediction['predictions']['home']) / 100
+                    pred_draw = float(prediction['predictions']['draw']) / 100
+                    pred_away = float(prediction['predictions']['away']) / 100
+                    for v in values_list:
+                        odd = float(v['odd'])
+                        if odd <= 1.40: continue
+                        implied = 1 / odd
+                        edge = 0.05
+                        if v['value'] == 'Home/Draw' and (pred_home + pred_draw) > implied + edge:
+                            values.append(f"🛡️ HOME/DRAW VALUE : {(pred_home+pred_draw)*100:.1f}% vs {odd} (edge {((pred_home+pred_draw)-implied)*100:.1f}%)")
+                        elif v['value'] == 'Draw/Away' and (pred_draw + pred_away) > implied + edge:
+                            values.append(f"🛡️ DRAW/AWAY VALUE : {(pred_draw+pred_away)*100:.1f}% vs {odd} (edge {((pred_draw+pred_away)-implied)*100:.1f}%)")
+                        elif v['value'] == 'Home/Away' and (pred_home + pred_away) > implied + edge:
+                            values.append(f"🛡️ HOME/AWAY VALUE : {(pred_home+pred_away)*100:.1f}% vs {odd} (edge {((pred_home+pred_away)-implied)*100:.1f}%)")
+
+                elif bet_name == "Asian Handicap":
+                    for v in values_list:
+                        odd = float(v['odd'])
+                        if odd <= 1.40: continue
+                        implied = 1 / odd
+                        if 0.53 > implied + 0.05:
+                            values.append(f"🇦🇸 ASIAN HC {v['value']} VALUE : 53.0% vs {odd} (edge {(0.53-implied)*100:.1f}%)")
+
                 elif bet_name == "Over/Under" and any(v['value'] == 'Over 2.5' for v in values_list):
                     for v in values_list:
                         if v['value'] == 'Over 2.5':
@@ -146,8 +174,7 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                             implied = 1 / odd
                             if 0.55 > implied + 0.05:
                                 values.append(f"🔥 OVER 2.5 VALUE : 55.0% vs {odd} (edge {(0.55-implied)*100:.1f}%)")
-                
-                # BTTS
+
                 elif bet_name == "Both Teams To Score":
                     for v in values_list:
                         if v['value'] == 'Yes':
@@ -161,9 +188,8 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
     return "\n".join(values) if values else None
 
 def check_value_bets():
-    print("🔍 Analyse des matchs (toutes ligues + cote ≥ 1.40)...")
-    
-    # Pré-match
+    print("🔍 Analyse des matchs (toutes ligues + cote ≥ 1.40 + tous marchés)...")
+    # Pré-match + Live (code identique à la version B)
     fixtures = get_fixtures(live=False)
     for fixture in fixtures:
         fid = fixture['fixture']['id']
@@ -173,14 +199,12 @@ def check_value_bets():
         odds = get_odds(fid)
         value_msg = calcul_value_bet(odds, pred, fid)
         if value_msg:
-            # Récupération blessures + forme
             injuries = get_injuries(fid)
             league = fixture['league']['name']
             match = f"{fixture['teams']['home']['name']} vs {fixture['teams']['away']['name']}"
             msg = f"🚨 VALUE BET (Pré-match)\n\n{league}\n{match}\n{value_msg}\n\n{injuries}\n📅 {fixture['fixture']['date'][:16]}"
             envoyer_notification(msg, fid)
     
-    # Live
     live_fixtures = get_fixtures(live=True)
     for fixture in live_fixtures:
         fid = fixture['fixture']['id']
@@ -197,7 +221,7 @@ def check_value_bets():
             msg = f"🔴 VALUE BET LIVE\n\n{league}\n{match} ({score})\n{value_msg}\n\n{injuries}"
             envoyer_notification(msg, fid)
 
-# ====================== FLASK ======================
+# ====================== FLASK + DASHBOARD ======================
 app = Flask(__name__)
 
 @app.route('/')
@@ -207,6 +231,40 @@ def home():
 @app.route('/ping')
 def ping():
     return "pong", 200
+
+@app.route('/dashboard')
+def dashboard():
+    html = """
+    <html>
+    <head>
+        <title>APEX-SIRIUS Dashboard</title>
+        <meta http-equiv="refresh" content="30">
+        <style>
+            body { font-family: Arial; background: #0f172a; color: #e2e8f0; padding: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #334155; }
+            th { background: #1e2937; }
+            .live { color: #f43f5e; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <h1>🚀 APEX-SIRIUS Dashboard (Live)</h1>
+        <p>Dernière mise à jour : {{ now }} | Actualisation auto toutes les 30 secondes</p>
+        <table>
+            <tr><th>Heure</th><th>Match</th><th>Message complet</th></tr>
+            {% for bet in history %}
+            <tr>
+                <td>{{ bet.time }}</td>
+                <td>{{ bet.message.split('\n')[2] if '\n' in bet.message else bet.message }}</td>
+                <td><pre style="white-space: pre-wrap; font-size: 13px;">{{ bet.message }}</pre></td>
+            </tr>
+            {% endfor %}
+        </table>
+        <p style="margin-top:30px; font-size:12px;">APEX-SIRIUS v4 • Valeur bets en direct + blessures + tous marchés</p>
+    </body>
+    </html>
+    """
+    return render_template_string(html, history=value_bets_history[::-1], now=datetime.now().strftime("%H:%M:%S"))
 
 # ====================== SCHEDULER ======================
 scheduler_started = False
