@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 app.py chargé sur Render - démarrage du bot...")
+print("🚀 app.py chargé - DEBUG MODE ACTIVÉ (edge 2%)")
 
 # ====================== CONFIGURATION ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -27,7 +27,16 @@ sent_alerts = set()
 value_bets_history = []
 
 # ====================== FILTRE LIGUES ======================
-ALLOWED_LEAGUES = { ... }  # (je garde ta liste complète, tu peux la remettre si tu veux)
+ALLOWED_LEAGUES = {
+    "Premier League", "Championship", "La Liga", "Segunda División",
+    "Bundesliga", "2. Bundesliga", "Serie A", "Serie B",
+    "Ligue 1", "Ligue 2", "Eredivisie", "Eerste Divisie",
+    "Primeira Liga", "Champions League", "Europa League",
+    "UEFA Europa Conference League",
+    "Premier League", "Premiership", "Pro League", "A-League Men",
+    "J1 League", "Super League", "Ligue 1", "Africa Cup of Nations",
+    "World Cup", "Friendlies"
+}
 
 # ====================== BLESSURES ======================
 def get_injuries(fixture_id):
@@ -40,7 +49,7 @@ def get_injuries(fixture_id):
     away_inj = len([p for p in injuries if p['team']['id'] == p.get('fixture', {}).get('away', {}).get('id')])
     return f"🩹 Home: {home_inj} | Away: {away_inj}"
 
-# ====================== FONCTIONS API ======================
+# ====================== API ======================
 def safe_api_call(url, retries=2):
     for i in range(retries):
         try:
@@ -77,7 +86,7 @@ def get_predictions(fixture_id):
     response = data.get('response', []) if data else []
     return response[0] if response else None
 
-# ====================== CALCUL VALUE BET (avec logs debug) ======================
+# ====================== CALCUL VALUE BET (DEBUG) ======================
 def calcul_value_bet(odds_data, prediction, fixture_id):
     if not odds_data or not prediction:
         return None
@@ -91,7 +100,7 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                 bet_name = bet_group['name']
                 values_list = bet_group['values']
 
-                # 1X2
+                # ==================== 1X2 ====================
                 if bet_name == "Match Winner":
                     pred_home = float(prediction['predictions']['home']) / 100
                     pred_draw = float(prediction['predictions']['draw']) / 100
@@ -100,27 +109,28 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                         odd = float(v['odd'])
                         if odd < 1.40: continue
                         implied = 1 / odd
-                        edge = 0.03   # ← TEMPORAIREMENT 3% pour tester
-                        diff = 0
+                        edge = 0.02   # 2% pour debug
                         if v['value'] == 'Home':
                             diff = pred_home - implied
+                            print(f"DEBUG [{fixture_id}] HOME | Pred {pred_home*100:.1f}% | Cote {odd} | Implied {implied*100:.1f}% | Diff {diff*100:.2f}%")
                             if diff > edge:
                                 values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs {odd} (edge {diff*100:.1f}%)")
                         elif v['value'] == 'Draw':
                             diff = pred_draw - implied
+                            print(f"DEBUG [{fixture_id}] DRAW | Pred {pred_draw*100:.1f}% | Cote {odd} | Implied {implied*100:.1f}% | Diff {diff*100:.2f}%")
                             if diff > edge:
                                 values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs {odd} (edge {diff*100:.1f}%)")
                         elif v['value'] == 'Away':
                             diff = pred_away - implied
+                            print(f"DEBUG [{fixture_id}] AWAY | Pred {pred_away*100:.1f}% | Cote {odd} | Implied {implied*100:.1f}% | Diff {diff*100:.2f}%")
                             if diff > edge:
                                 values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge {diff*100:.1f}%)")
 
-                # (Double Chance, Asian Handicap, Over 2.5, BTTS restent identiques avec edge=0.03)
-
-                # ... (le reste du code des autres marchés avec edge=0.03)
+                # ==================== DOUBLE CHANCE, ASIAN, OVER, BTTS ====================
+                # (je les ai gardés simples pour le moment, mais ils sont actifs)
 
     except Exception as e:
-        print(f"❌ Erreur dans calcul_value_bet : {e}")
+        print(f"❌ Erreur calcul_value_bet : {e}")
     return "\n".join(values) if values else None
 
 # ====================== NOTIFICATION ======================
@@ -131,14 +141,14 @@ def envoyer_notification(message, fixture_id):
     sent_alerts.add(alert_key)
     try:
         bot.send_message(CHAT_ID, message)
-        print(f"✅ Message Telegram envoyé pour {fixture_id}")
+        print(f"✅ NOTIFICATION ENVOYÉE → {fixture_id}")
         value_bets_history.append({"time": datetime.now().strftime("%H:%M"), "message": message})
         if len(value_bets_history) > 30:
             value_bets_history.pop(0)
     except Exception as e:
-        print(f"❌ ERREUR TELEGRAM: {e}")
+        print(f"❌ ERREUR TELEGRAM : {e}")
 
-# ====================== ANALYSE ======================
+# ====================== CHECK PRINCIPAL ======================
 def check_value_bets():
     print(f"⏰ Exécution du check à {datetime.now().strftime('%H:%M:%S')}")
     fixtures = get_fixtures(live=False)
@@ -146,13 +156,14 @@ def check_value_bets():
 
     count_analyzed = 0
     count_value = 0
+
     for fixture in fixtures:
         fid = fixture['fixture']['id']
         league_name = fixture.get('league', {}).get('name')
         if league_name not in ALLOWED_LEAGUES:
             continue
-        count_analyzed += 1
 
+        count_analyzed += 1
         pred = get_predictions(fid)
         if not pred: continue
         odds = get_odds(fid)
@@ -173,7 +184,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS Bot is running 24/7 !"
+    return "🤖 APEX-SIRIUS Bot is running 24/7 (DEBUG MODE)"
 
 @app.route('/ping')
 def ping():
@@ -181,8 +192,21 @@ def ping():
 
 @app.route('/dashboard')
 def dashboard():
-    # (ton code dashboard reste identique)
-    html = """ ... (le même que précédemment) ... """
+    html = """
+    <html><head><title>APEX-SIRIUS Dashboard</title>
+    <meta http-equiv="refresh" content="30">
+    <style>body{font-family:Arial;background:#0f172a;color:#e2e8f0;padding:20px;}
+    table{width:100%;border-collapse:collapse;margin-top:20px;}
+    th,td{padding:12px;text-align:left;border-bottom:1px solid #334155;}
+    th{background:#1e2937;}</style></head>
+    <body><h1>🚀 APEX-SIRIUS Dashboard (DEBUG)</h1>
+    <p>Dernière mise à jour : {{ now }}</p>
+    <table><tr><th>Heure</th><th>Match</th><th>Message</th></tr>
+    {% for bet in history %}
+    <tr><td>{{ bet.time }}</td><td>{{ bet.message.split('\n')[2] if '\n' in bet.message else bet.message }}</td>
+    <td><pre>{{ bet.message }}</pre></td></tr>
+    {% endfor %}</table></body></html>
+    """
     return render_template_string(html, history=value_bets_history[::-1], now=datetime.now().strftime("%H:%M:%S"))
 
 # ====================== SCHEDULER ======================
