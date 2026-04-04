@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vFINAL - DEBUG + CORRECTION PROBABILITÉS", flush=True)
+print("🚀 APEX-SIRIUS vFINAL - CORRECTION STRUCTURE API", flush=True)
 
 # ====================== CONFIGURATION ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -100,9 +100,11 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
     values = []
     try:
         preds = prediction.get('predictions', {})
-        pred_home = float(preds.get('home_team_win_probability', 0)) / 100
-        pred_draw = float(preds.get('draw_probability', 0)) / 100
-        pred_away = float(preds.get('away_team_win_probability', 0)) / 100
+        percent = preds.get('percent', {})   # ← CLÉ CORRIGÉE
+
+        pred_home = float(str(percent.get('home', '0')).replace('%', '')) / 100
+        pred_draw = float(str(percent.get('draw', '0')).replace('%', '')) / 100
+        pred_away = float(str(percent.get('away', '0')).replace('%', '')) / 100
 
         edge = 0.02  # 2% (tu peux mettre 0.0 pour tester)
 
@@ -139,9 +141,6 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                                 values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge {edge_calc*100:.1f}%)")
                             print(f"[DEBUG] AWAY | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_away*100:.1f}% | edge={edge_calc*100:.1f}%", flush=True)
 
-                # Double Chance, Asian Handicap, Over 2.5, BTTS (à compléter si besoin)
-                # ... (tu peux garder le code des autres marchés de la version précédente)
-
     except Exception as e:
         print(f"❌ Erreur calcul_value_bet : {e}", flush=True)
 
@@ -171,8 +170,7 @@ def check_value_bets():
     count_analyzed = 0
     count_value = 0
 
-    # Limite à 15 matchs les plus proches pour économiser le quota
-    for fixture in fixtures[:15]:
+    for fixture in fixtures[:15]:   # Limite à 15 matchs pour respecter ton quota
         fid = fixture['fixture']['id']
         league_name = fixture.get('league', {}).get('name')
         if league_name not in ALLOWED_LEAGUES:
