@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vPROD-FINALE - ZERO FILTRE LIGUES + toutes features", flush=True)
+print("🚀 APEX-SIRIUS vPROD-FINALE - Pré/live + toutes features", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -174,10 +174,10 @@ def check_value_bets():
     count_analyzed = 0
     count_value = 0
 
-    for fixture in fixtures[:20]:
+    for fixture in fixtures[:80]:   # ← 80 pour trouver des pré/live
         status = fixture['fixture']['status']['short']
         if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
-            continue  # uniquement pré-match + live
+            continue
 
         country = fixture.get('league', {}).get('country', 'Inconnu')
         league_name = fixture.get('league', {}).get('name', 'Inconnu')
@@ -186,7 +186,7 @@ def check_value_bets():
         away = fixture['teams']['away']['name']
 
         count_analyzed += 1
-        print(f"✅ Analyzing: {league_name} - {home} vs {away}", flush=True)
+        print(f"✅ Analyzing ({status}): {league_name} - {home} vs {away}", flush=True)
 
         pred = get_predictions(fixture['fixture']['id'])
         odds = get_odds(fixture['fixture']['id'])
