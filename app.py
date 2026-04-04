@@ -7,8 +7,9 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vDIAGNOSTIC-EXTREME - ZERO FILTRE + PRINTS MAX", flush=True)
+print("🚀 APEX-SIRIUS vPROD-FINALE - 3% edge + toutes features", flush=True)
 
+# ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
@@ -26,6 +27,17 @@ sent_alerts = set()
 value_bets_history = []
 debug_structure_logged = False
 
+# ====================== LIGUES ======================
+LEAGUE_KEYWORDS = [
+    "premier", "championship", "la liga", "segunda", "bundesliga", "2. bundesliga",
+    "serie a", "serie b", "ligue 1", "ligue 2", "eredivisie", "eerste", "primeira",
+    "champions", "europa", "conference", "premiership", "pro league", "j1", "saudi",
+    "russian", "egyptian", "maltese", "greek", "tunisian", "africa cup", "world cup",
+    "friendlies", "jupiler", "allsvenskan", "ekstraklasa", "super league", "k league",
+    "ligat", "süper lig", "veikkausliiga", "meistriliiga", "virsliga", "a lyga"
+]
+
+# ====================== API ======================
 def safe_api_call(url):
     try:
         resp = requests.get(url, headers=HEADERS, timeout=12)
@@ -66,6 +78,7 @@ def get_injuries(fixture_id):
     away_inj = len([p for p in injuries if p.get('team', {}).get('id') == p.get('fixture', {}).get('away', {}).get('id')])
     return f"🩹 Home: {home_inj} | Away: {away_inj}"
 
+# ====================== CALCUL VALUE BET ======================
 def calcul_value_bet(odds_data, prediction, fixture):
     global debug_structure_logged
     if not odds_data or not prediction:
@@ -93,6 +106,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
                 name = bet_group['name']
                 vals = bet_group['values']
 
+                # 1X2
                 if name == "Match Winner":
                     for v in vals:
                         odd = float(v['odd'])
@@ -105,6 +119,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
                         elif v['value'] == 'Away' and (pred_away - implied) > edge:
                             values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge +{(pred_away-implied)*100:.1f}%)")
 
+                # Over 2.5
                 if name == "Goals Over/Under":
                     for v in vals:
                         if v['value'] == 'Over 2.5':
@@ -113,6 +128,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
                             if (0.58 - implied) > edge:
                                 values.append(f"🔥 OVER 2.5 : {odd} (edge +{(0.58-implied)*100:.1f}%)")
 
+                # BTTS
                 if name == "Both Teams To Score":
                     for v in vals:
                         if v['value'] == 'Yes':
@@ -121,6 +137,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
                             if (0.55 - implied) > edge:
                                 values.append(f"🔄 BTTS YES : {odd} (edge +{(0.55-implied)*100:.1f}%)")
 
+                # Corners
                 if name == "Corners Over/Under":
                     for v in vals:
                         if "Over 9.5" in v['value']:
@@ -129,6 +146,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
                             if (0.52 - implied) > edge:
                                 values.append(f"📐 OVER 9.5 CORNERS : {odd} (edge +{(0.52-implied)*100:.1f}%)")
 
+                # Tirs cadrés
                 if name == "Shots on Goal":
                     for v in vals:
                         if "Over 4.5" in v['value']:
@@ -141,6 +159,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
 
     return "\n".join(values) if values else None
 
+# ====================== NOTIFICATION ======================
 def envoyer_notification(message, fixture_id, country, league, date_time):
     alert_key = f"{fixture_id}_{hash(message)}"
     if alert_key in sent_alerts:
@@ -161,26 +180,32 @@ def envoyer_notification(message, fixture_id, country, league, date_time):
     except Exception as e:
         print(f"❌ Erreur Telegram: {e}", flush=True)
 
+# ====================== CHECK ======================
 def check_value_bets():
-    print("🚨🚨🚨 CHECK_VALUE_BETS DÉMARRÉ 🚨🚨🚨", flush=True)
-    print(f"⏰ Heure : {datetime.now().strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check lancé à {datetime.now().strftime('%H:%M:%S')}", flush=True)
     fixtures = get_fixtures()
-    print(f"📊 {len(fixtures)} matchs trouvés dans l'API", flush=True)
+    print(f"📊 {len(fixtures)} matchs trouvés aujourd'hui.", flush=True)
 
     count_analyzed = 0
     count_value = 0
 
-    for i, fixture in enumerate(fixtures[:30]):
-        league_name = fixture.get('league', {}).get('name', 'Inconnu')
+    for fixture in fixtures[:20]:
         status = fixture['fixture']['status']['short']
+        if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
+            continue  # uniquement pré-match + live
+
+        league_name = fixture.get('league', {}).get('name', '')
+        league_lower = league_name.lower()
+        if not any(kw in league_lower for kw in LEAGUE_KEYWORDS):
+            continue
+
         country = fixture.get('league', {}).get('country', 'Inconnu')
         date_time = fixture['fixture']['date'][:16].replace('T', ' ')
         home = fixture['teams']['home']['name']
         away = fixture['teams']['away']['name']
 
-        print(f"DEBUG #{i+1} → League: {league_name} | Status: {status} | {home} vs {away}", flush=True)
-
         count_analyzed += 1
+        print(f"✅ Analyzing: {league_name} - {home} vs {away} ({status})", flush=True)
 
         pred = get_predictions(fixture['fixture']['id'])
         odds = get_odds(fixture['fixture']['id'])
@@ -193,14 +218,14 @@ def check_value_bets():
                 msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
                 envoyer_notification(msg, fixture['fixture']['id'], country, league_name, date_time)
 
-    print(f"🔍 FIN DU CHECK → {count_analyzed} analysés | {count_value} value bets trouvés", flush=True)
+    print(f"🔍 Analyse terminée: {count_analyzed} analysés | {count_value} value bets trouvés\n", flush=True)
 
 # ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS DIAGNOSTIC EXTREME Running"
+    return "🤖 APEX-SIRIUS Bot PROD FINALE Running 24/7"
 
 @app.route('/ping')
 def ping():
@@ -208,7 +233,7 @@ def ping():
 
 @app.route('/test')
 def test():
-    print("🚨 SCAN MANUEL DÉCLENCHÉ VIA /test", flush=True)
+    print("🚨 SCAN MANUEL DÉCLENCHÉ", flush=True)
     check_value_bets()
     return "✅ Scan manuel lancé – regarde les logs Render", 200
 
@@ -218,7 +243,7 @@ def dashboard():
     <html><head><title>APEX Dashboard</title>
     <meta http-equiv="refresh" content="30">
     <style>body{font-family:Arial;background:#111;color:#eee;padding:20px;}</style></head>
-    <body><h1>🚀 APEX-SIRIUS DIAGNOSTIC EXTREME</h1>
+    <body><h1>🚀 APEX-SIRIUS Dashboard PROD</h1>
     {% for bet in history %}<div><b>{{ bet.time }}</b><pre>{{ bet.message }}</pre></div><hr>{% endfor %}
     </body></html>
     """
