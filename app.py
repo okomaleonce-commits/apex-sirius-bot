@@ -5,9 +5,9 @@ import schedule
 import os
 import threading
 from flask import Flask, render_template_string
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
-print("🚀 APEX-SIRIUS vPROD-FINALE - SEULEMENT PRÉ-MATCH + LIVE", flush=True)
+print("🚀 APEX-SIRIUS vFINAL - Filtre temporel UTC correct", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -171,20 +171,23 @@ def check_value_bets():
     fixtures = get_fixtures()
     print(f"📊 {len(fixtures)} matchs trouvés aujourd'hui.", flush=True)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     count_analyzed = 0
     count_value = 0
 
-    for fixture in fixtures[:80]:   # 80 matchs pour avoir plus de chances
+    for fixture in fixtures[:40]:
         status = fixture['fixture']['status']['short']
-        # On garde uniquement pré-match et live
+        # Garder uniquement pré-match et live récent
         if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
             continue
 
-        # Vérification date/heure (match à venir ou en cours)
         try:
             match_date = datetime.fromisoformat(fixture['fixture']['date'].replace('Z', '+00:00'))
-            if match_date < now - timedelta(hours=2):  # on ignore les matchs terminés depuis plus de 2h
+            # Ignorer les matchs terminés depuis plus de 90 minutes
+            if match_date < now - timedelta(minutes=90):
+                continue
+            # Ignorer les matchs trop loin (plus de 6h)
+            if match_date > now + timedelta(hours=6):
                 continue
         except:
             continue
