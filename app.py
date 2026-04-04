@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vFINAL - DEBUG + CORRECTION PROBABILITÉS")
+print("🚀 APEX-SIRIUS vFINAL - DEBUG + CORRECTION PROBABILITÉS", flush=True)
 
 # ====================== CONFIGURATION ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -15,9 +15,9 @@ CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
 
 if not all([BOT_TOKEN, CHAT_ID, API_KEY]):
-    print("❌ ERREUR CRITIQUE: Variables d'environnement manquantes !")
+    print("❌ ERREUR CRITIQUE: Variables d'environnement manquantes !", flush=True)
 else:
-    print("✅ Configuration chargée avec succès.")
+    print("✅ Configuration chargée avec succès.", flush=True)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 BASE_URL = "https://v3.football.api-sports.io"
@@ -58,12 +58,12 @@ def safe_api_call(url, retries=2):
             if resp.status_code == 200:
                 return resp.json()
             elif resp.status_code == 429:
-                print("🛑 QUOTA API ATTEINT (429)")
+                print("🛑 QUOTA API ATTEINT (429)", flush=True)
                 return None
             else:
-                print(f"⚠️ API Erreur {resp.status_code}")
+                print(f"⚠️ API Erreur {resp.status_code}", flush=True)
         except Exception as e:
-            print(f"⚠️ Exception API: {e}")
+            print(f"⚠️ Exception API: {e}", flush=True)
         time.sleep(1)
     return None
 
@@ -93,9 +93,8 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
     if not odds_data or not prediction:
         return None
 
-    # Debug structure une seule fois
     if not debug_structure_logged:
-        print("🔍 STRUCTURE PREDICTION BRUTE :", prediction.get('predictions'))
+        print(f"🔍 STRUCTURE PREDICTION BRUTE (Match {fixture_id}): {prediction.get('predictions')}", flush=True)
         debug_structure_logged = True
 
     values = []
@@ -111,7 +110,6 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
         for bm in bookmakers:
             if bm['name'].lower() not in ['pinnacle', 'betway', 'bet365']:
                 continue
-
             for bet_group in bm['bets']:
                 bet_name = bet_group['name']
                 values_list = bet_group['values']
@@ -127,25 +125,25 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
                             edge_calc = pred_home - implied
                             if edge_calc > edge:
                                 values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs {odd} (edge {edge_calc*100:.1f}%)")
-                            print(f"[DEBUG] HOME | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_home*100:.1f}% | edge={edge_calc*100:.1f}%")
+                            print(f"[DEBUG] HOME | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_home*100:.1f}% | edge={edge_calc*100:.1f}%", flush=True)
 
                         elif v['value'] == 'Draw':
                             edge_calc = pred_draw - implied
                             if edge_calc > edge:
                                 values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs {odd} (edge {edge_calc*100:.1f}%)")
-                            print(f"[DEBUG] DRAW | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_draw*100:.1f}% | edge={edge_calc*100:.1f}%")
+                            print(f"[DEBUG] DRAW | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_draw*100:.1f}% | edge={edge_calc*100:.1f}%", flush=True)
 
                         elif v['value'] == 'Away':
                             edge_calc = pred_away - implied
                             if edge_calc > edge:
                                 values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge {edge_calc*100:.1f}%)")
-                            print(f"[DEBUG] AWAY | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_away*100:.1f}% | edge={edge_calc*100:.1f}%")
+                            print(f"[DEBUG] AWAY | odd={odd:.2f} | implied={implied*100:.1f}% | pred={pred_away*100:.1f}% | edge={edge_calc*100:.1f}%", flush=True)
 
-                # Double Chance, Asian Handicap, Over 2.5, BTTS (identique à avant, avec edge=0.02)
+                # Double Chance, Asian Handicap, Over 2.5, BTTS (à compléter si besoin)
                 # ... (tu peux garder le code des autres marchés de la version précédente)
 
     except Exception as e:
-        print(f"❌ Erreur calcul_value_bet : {e}")
+        print(f"❌ Erreur calcul_value_bet : {e}", flush=True)
 
     return "\n".join(values) if values else None
 
@@ -157,23 +155,24 @@ def envoyer_notification(message, fixture_id):
     sent_alerts.add(alert_key)
     try:
         bot.send_message(CHAT_ID, message)
-        print(f"✅ Notification Telegram envoyée pour {fixture_id}")
+        print(f"✅ Notification Telegram envoyée pour {fixture_id}", flush=True)
         value_bets_history.append({"time": datetime.now().strftime("%H:%M"), "message": message})
         if len(value_bets_history) > 30:
             value_bets_history.pop(0)
     except Exception as e:
-        print(f"❌ Erreur Telegram : {e}")
+        print(f"❌ Erreur Telegram : {e}", flush=True)
 
 # ====================== CHECK ======================
 def check_value_bets():
-    print(f"⏰ Exécution du check à {datetime.now().strftime('%H:%M:%S')}")
+    print(f"⏰ Exécution du check à {datetime.now().strftime('%H:%M:%S')}", flush=True)
     fixtures = get_fixtures()
-    print(f"📊 {len(fixtures)} matchs trouvés aujourd'hui.")
+    print(f"📊 {len(fixtures)} matchs trouvés aujourd'hui.", flush=True)
 
     count_analyzed = 0
     count_value = 0
 
-    for fixture in fixtures:
+    # Limite à 15 matchs les plus proches pour économiser le quota
+    for fixture in fixtures[:15]:
         fid = fixture['fixture']['id']
         league_name = fixture.get('league', {}).get('name')
         if league_name not in ALLOWED_LEAGUES:
@@ -193,7 +192,7 @@ def check_value_bets():
             msg = f"🚨 VALUE BET (Pré-match)\n\n{league_name}\n{match}\n{value_msg}\n\n{injuries}\n📅 {fixture['fixture']['date'][:16]}"
             envoyer_notification(msg, fid)
 
-    print(f"🔍 Analyse terminée: {count_analyzed} matchs analysés | {count_value} value bets trouvés")
+    print(f"🔍 Analyse terminée: {count_analyzed} matchs analysés | {count_value} value bets trouvés", flush=True)
 
 # ====================== FLASK + DASHBOARD ======================
 app = Flask(__name__)
@@ -205,6 +204,12 @@ def home():
 @app.route('/ping')
 def ping():
     return "pong", 200
+
+@app.route('/test')
+def test():
+    print("🚨 SCAN MANUEL DEMANDÉ VIA /test", flush=True)
+    check_value_bets()
+    return "✅ Scan manuel lancé ! Regarde les logs Render.", 200
 
 @app.route('/dashboard')
 def dashboard():
@@ -224,7 +229,7 @@ def dashboard():
 
 # ====================== SCHEDULER ======================
 def run_scheduler():
-    print("🗓️ Scheduler démarré...")
+    print("🗓️ Scheduler démarré...", flush=True)
     check_value_bets()  # Premier check immédiat
     schedule.every(30).minutes.do(check_value_bets)
     while True:
