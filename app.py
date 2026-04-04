@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vFINAL - CORRECTION STRUCTURE API", flush=True)
+print("🚀 APEX-SIRIUS vFINAL - CORRECTION STRUCTURE 'percent'", flush=True)
 
 # ====================== CONFIGURATION ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -100,13 +100,13 @@ def calcul_value_bet(odds_data, prediction, fixture_id):
     values = []
     try:
         preds = prediction.get('predictions', {})
-        percent = preds.get('percent', {})   # ← CLÉ CORRIGÉE
+        percent = preds.get('percent', {})  # ← CLÉ CORRIGÉE
 
         pred_home = float(str(percent.get('home', '0')).replace('%', '')) / 100
         pred_draw = float(str(percent.get('draw', '0')).replace('%', '')) / 100
         pred_away = float(str(percent.get('away', '0')).replace('%', '')) / 100
 
-        edge = 0.02  # 2% (tu peux mettre 0.0 pour tester)
+        edge = 0.02  # 2% (change à 0.0 pour tester)
 
         bookmakers = odds_data[0].get('bookmakers', [])
         for bm in bookmakers:
@@ -170,7 +170,8 @@ def check_value_bets():
     count_analyzed = 0
     count_value = 0
 
-    for fixture in fixtures[:15]:   # Limite à 15 matchs pour respecter ton quota
+    # Limite stricte à 15 matchs pour respecter ton quota 7500/jour
+    for fixture in fixtures[:15]:
         fid = fixture['fixture']['id']
         league_name = fixture.get('league', {}).get('name')
         if league_name not in ALLOWED_LEAGUES:
