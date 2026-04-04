@@ -7,9 +7,8 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vDIAGNOSTIC-ULTIME - Filtre désactivé + debug total ligues", flush=True)
+print("🚀 APEX-SIRIUS vDIAGNOSTIC-EXTREME - ZERO FILTRE + PRINTS MAX", flush=True)
 
-# ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
@@ -27,7 +26,6 @@ sent_alerts = set()
 value_bets_history = []
 debug_structure_logged = False
 
-# ====================== API ======================
 def safe_api_call(url):
     try:
         resp = requests.get(url, headers=HEADERS, timeout=12)
@@ -68,7 +66,6 @@ def get_injuries(fixture_id):
     away_inj = len([p for p in injuries if p.get('team', {}).get('id') == p.get('fixture', {}).get('away', {}).get('id')])
     return f"🩹 Home: {home_inj} | Away: {away_inj}"
 
-# ====================== CALCUL VALUE BET ======================
 def calcul_value_bet(odds_data, prediction, fixture):
     global debug_structure_logged
     if not odds_data or not prediction:
@@ -144,7 +141,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
 
     return "\n".join(values) if values else None
 
-# ====================== NOTIFICATION ======================
 def envoyer_notification(message, fixture_id, country, league, date_time):
     alert_key = f"{fixture_id}_{hash(message)}"
     if alert_key in sent_alerts:
@@ -165,32 +161,26 @@ def envoyer_notification(message, fixture_id, country, league, date_time):
     except Exception as e:
         print(f"❌ Erreur Telegram: {e}", flush=True)
 
-# ====================== CHECK ======================
 def check_value_bets():
-    print(f"\n⏰ Check lancé à {datetime.now().strftime('%H:%M:%S')}", flush=True)
+    print("🚨🚨🚨 CHECK_VALUE_BETS DÉMARRÉ 🚨🚨🚨", flush=True)
+    print(f"⏰ Heure : {datetime.now().strftime('%H:%M:%S')}", flush=True)
     fixtures = get_fixtures()
-    print(f"📊 {len(fixtures)} matchs trouvés aujourd'hui.", flush=True)
+    print(f"📊 {len(fixtures)} matchs trouvés dans l'API", flush=True)
 
     count_analyzed = 0
     count_value = 0
 
-    for i, fixture in enumerate(fixtures[:30]):   # ← 30 premiers matchs SANS filtre
+    for i, fixture in enumerate(fixtures[:30]):
         league_name = fixture.get('league', {}).get('name', 'Inconnu')
         status = fixture['fixture']['status']['short']
-        if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
-            continue
-
-        # DEBUG : on affiche TOUTES les ligues des 50 premiers matchs
-        if i < 50:
-            print(f"League reçue #{i+1}: {league_name}", flush=True)
-
         country = fixture.get('league', {}).get('country', 'Inconnu')
         date_time = fixture['fixture']['date'][:16].replace('T', ' ')
         home = fixture['teams']['home']['name']
         away = fixture['teams']['away']['name']
 
+        print(f"DEBUG #{i+1} → League: {league_name} | Status: {status} | {home} vs {away}", flush=True)
+
         count_analyzed += 1
-        print(f"✅ Analyzing (no filter): {league_name} - {home} vs {away}", flush=True)
 
         pred = get_predictions(fixture['fixture']['id'])
         odds = get_odds(fixture['fixture']['id'])
@@ -203,14 +193,14 @@ def check_value_bets():
                 msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
                 envoyer_notification(msg, fixture['fixture']['id'], country, league_name, date_time)
 
-    print(f"🔍 Analyse terminée: {count_analyzed} analysés | {count_value} value bets trouvés\n", flush=True)
+    print(f"🔍 FIN DU CHECK → {count_analyzed} analysés | {count_value} value bets trouvés", flush=True)
 
 # ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS Bot DIAGNOSTIC Running"
+    return "🤖 APEX-SIRIUS DIAGNOSTIC EXTREME Running"
 
 @app.route('/ping')
 def ping():
@@ -218,7 +208,7 @@ def ping():
 
 @app.route('/test')
 def test():
-    print("🚨 SCAN MANUEL DÉCLENCHÉ", flush=True)
+    print("🚨 SCAN MANUEL DÉCLENCHÉ VIA /test", flush=True)
     check_value_bets()
     return "✅ Scan manuel lancé – regarde les logs Render", 200
 
@@ -228,7 +218,7 @@ def dashboard():
     <html><head><title>APEX Dashboard</title>
     <meta http-equiv="refresh" content="30">
     <style>body{font-family:Arial;background:#111;color:#eee;padding:20px;}</style></head>
-    <body><h1>🚀 APEX-SIRIUS Dashboard DIAGNOSTIC</h1>
+    <body><h1>🚀 APEX-SIRIUS DIAGNOSTIC EXTREME</h1>
     {% for bet in history %}<div><b>{{ bet.time }}</b><pre>{{ bet.message }}</pre></div><hr>{% endfor %}
     </body></html>
     """
