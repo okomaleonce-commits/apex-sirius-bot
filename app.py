@@ -5,9 +5,9 @@ import schedule
 import os
 import threading
 from flask import Flask, render_template_string
-from datetime import datetime
+from datetime import datetime, timedelta
 
-print("🚀 APEX-SIRIUS vPROD-FINALE-STABLE - 40 matchs + tout ce que tu as demandé", flush=True)
+print("🚀 APEX-SIRIUS vPROD-DEFINITIVE - 150 matchs + filtre temporel intelligent", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -171,17 +171,23 @@ def check_value_bets():
     fixtures = get_fixtures()
     print(f"📊 {len(fixtures)} matchs trouvés aujourd'hui.", flush=True)
 
+    now = datetime.now()
     count_analyzed = 0
     count_value = 0
 
-    for fixture in fixtures[:40]:   # 40 matchs → on est sûr de trouver des pré/live
-        status = fixture['fixture']['status']['short']
-        if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
+    for fixture in fixtures[:150]:   # ← Large slice pour atteindre les pré/live
+        try:
+            match_date_str = fixture['fixture']['date']
+            match_date = datetime.fromisoformat(match_date_str.replace('Z', '+00:00'))
+            if match_date < now - timedelta(hours=4):  # skip très vieux matchs terminés
+                continue
+        except:
             continue
 
+        status = fixture['fixture']['status']['short']
         country = fixture.get('league', {}).get('country', 'Inconnu')
         league_name = fixture.get('league', {}).get('name', 'Inconnu')
-        date_time = fixture['fixture']['date'][:16].replace('T', ' ')
+        date_time = match_date_str[:16].replace('T', ' ')
         home = fixture['teams']['home']['name']
         away = fixture['teams']['away']['name']
 
