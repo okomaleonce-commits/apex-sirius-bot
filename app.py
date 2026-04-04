@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vPROD-FINALE - 3% edge + toutes features", flush=True)
+print("🚀 APEX-SIRIUS vPROD-DEFINITIVE - Filtre ultra large", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -27,14 +27,16 @@ sent_alerts = set()
 value_bets_history = []
 debug_structure_logged = False
 
-# ====================== LIGUES ======================
+# ====================== FILTRE LIGUES ULTRA LARGE ======================
 LEAGUE_KEYWORDS = [
     "premier", "championship", "la liga", "segunda", "bundesliga", "2. bundesliga",
     "serie a", "serie b", "ligue 1", "ligue 2", "eredivisie", "eerste", "primeira",
-    "champions", "europa", "conference", "premiership", "pro league", "j1", "saudi",
-    "russian", "egyptian", "maltese", "greek", "tunisian", "africa cup", "world cup",
-    "friendlies", "jupiler", "allsvenskan", "ekstraklasa", "super league", "k league",
-    "ligat", "süper lig", "veikkausliiga", "meistriliiga", "virsliga", "a lyga"
+    "champions", "europa", "conference", "premiership", "pro league", "jupiler",
+    "j1", "saudi", "russian", "egyptian", "maltese", "greek", "tunisian",
+    "africa cup", "world cup", "friendlies", "allsvenskan", "ekstraklasa",
+    "super league", "k league", "ligat", "süper lig", "veikkausliiga",
+    "liga mx", "nws", "brasileiro", "primera nacional", "j2", "j3",
+    "superliga", "first league", "second league"
 ]
 
 # ====================== API ======================
@@ -106,7 +108,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
                 name = bet_group['name']
                 vals = bet_group['values']
 
-                # 1X2
                 if name == "Match Winner":
                     for v in vals:
                         odd = float(v['odd'])
@@ -119,7 +120,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
                         elif v['value'] == 'Away' and (pred_away - implied) > edge:
                             values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd} (edge +{(pred_away-implied)*100:.1f}%)")
 
-                # Over 2.5
                 if name == "Goals Over/Under":
                     for v in vals:
                         if v['value'] == 'Over 2.5':
@@ -128,7 +128,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
                             if (0.58 - implied) > edge:
                                 values.append(f"🔥 OVER 2.5 : {odd} (edge +{(0.58-implied)*100:.1f}%)")
 
-                # BTTS
                 if name == "Both Teams To Score":
                     for v in vals:
                         if v['value'] == 'Yes':
@@ -137,7 +136,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
                             if (0.55 - implied) > edge:
                                 values.append(f"🔄 BTTS YES : {odd} (edge +{(0.55-implied)*100:.1f}%)")
 
-                # Corners
                 if name == "Corners Over/Under":
                     for v in vals:
                         if "Over 9.5" in v['value']:
@@ -146,7 +144,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
                             if (0.52 - implied) > edge:
                                 values.append(f"📐 OVER 9.5 CORNERS : {odd} (edge +{(0.52-implied)*100:.1f}%)")
 
-                # Tirs cadrés
                 if name == "Shots on Goal":
                     for v in vals:
                         if "Over 4.5" in v['value']:
@@ -192,31 +189,31 @@ def check_value_bets():
     for fixture in fixtures[:20]:
         status = fixture['fixture']['status']['short']
         if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
-            continue  # uniquement pré-match + live
+            continue
 
         league_name = fixture.get('league', {}).get('name', '')
         league_lower = league_name.lower()
-        if not any(kw in league_lower for kw in LEAGUE_KEYWORDS):
-            continue
 
-        country = fixture.get('league', {}).get('country', 'Inconnu')
-        date_time = fixture['fixture']['date'][:16].replace('T', ' ')
-        home = fixture['teams']['home']['name']
-        away = fixture['teams']['away']['name']
+        # Filtre très large
+        if any(kw in league_lower for kw in LEAGUE_KEYWORDS):
+            count_analyzed += 1
+            country = fixture.get('league', {}).get('country', 'Inconnu')
+            date_time = fixture['fixture']['date'][:16].replace('T', ' ')
+            home = fixture['teams']['home']['name']
+            away = fixture['teams']['away']['name']
 
-        count_analyzed += 1
-        print(f"✅ Analyzing: {league_name} - {home} vs {away} ({status})", flush=True)
+            print(f"✅ Analyzing: {league_name} - {home} vs {away}", flush=True)
 
-        pred = get_predictions(fixture['fixture']['id'])
-        odds = get_odds(fixture['fixture']['id'])
+            pred = get_predictions(fixture['fixture']['id'])
+            odds = get_odds(fixture['fixture']['id'])
 
-        if pred and odds:
-            value_msg = calcul_value_bet(odds, pred, fixture['fixture']['id'])
-            if value_msg:
-                count_value += 1
-                injuries = get_injuries(fixture['fixture']['id'])
-                msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
-                envoyer_notification(msg, fixture['fixture']['id'], country, league_name, date_time)
+            if pred and odds:
+                value_msg = calcul_value_bet(odds, pred, fixture['fixture']['id'])
+                if value_msg:
+                    count_value += 1
+                    injuries = get_injuries(fixture['fixture']['id'])
+                    msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
+                    envoyer_notification(msg, fixture['fixture']['id'], country, league_name, date_time)
 
     print(f"🔍 Analyse terminée: {count_analyzed} analysés | {count_value} value bets trouvés\n", flush=True)
 
@@ -225,7 +222,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS Bot PROD FINALE Running 24/7"
+    return "🤖 APEX-SIRIUS Bot PROD DEFINITIVE Running"
 
 @app.route('/ping')
 def ping():
