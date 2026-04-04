@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime
 
-print("🚀 APEX-SIRIUS vPROD-DEFINITIVE - Filtre ultra large", flush=True)
+print("🚀 APEX-SIRIUS vPROD-FINALE - ZERO FILTRE LIGUES + toutes features", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -26,18 +26,6 @@ HEADERS = {"x-apisports-key": API_KEY}
 sent_alerts = set()
 value_bets_history = []
 debug_structure_logged = False
-
-# ====================== FILTRE LIGUES ULTRA LARGE ======================
-LEAGUE_KEYWORDS = [
-    "premier", "championship", "la liga", "segunda", "bundesliga", "2. bundesliga",
-    "serie a", "serie b", "ligue 1", "ligue 2", "eredivisie", "eerste", "primeira",
-    "champions", "europa", "conference", "premiership", "pro league", "jupiler",
-    "j1", "saudi", "russian", "egyptian", "maltese", "greek", "tunisian",
-    "africa cup", "world cup", "friendlies", "allsvenskan", "ekstraklasa",
-    "super league", "k league", "ligat", "süper lig", "veikkausliiga",
-    "liga mx", "nws", "brasileiro", "primera nacional", "j2", "j3",
-    "superliga", "first league", "second league"
-]
 
 # ====================== API ======================
 def safe_api_call(url):
@@ -189,31 +177,27 @@ def check_value_bets():
     for fixture in fixtures[:20]:
         status = fixture['fixture']['status']['short']
         if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']:
-            continue
+            continue  # uniquement pré-match + live
 
-        league_name = fixture.get('league', {}).get('name', '')
-        league_lower = league_name.lower()
+        country = fixture.get('league', {}).get('country', 'Inconnu')
+        league_name = fixture.get('league', {}).get('name', 'Inconnu')
+        date_time = fixture['fixture']['date'][:16].replace('T', ' ')
+        home = fixture['teams']['home']['name']
+        away = fixture['teams']['away']['name']
 
-        # Filtre très large
-        if any(kw in league_lower for kw in LEAGUE_KEYWORDS):
-            count_analyzed += 1
-            country = fixture.get('league', {}).get('country', 'Inconnu')
-            date_time = fixture['fixture']['date'][:16].replace('T', ' ')
-            home = fixture['teams']['home']['name']
-            away = fixture['teams']['away']['name']
+        count_analyzed += 1
+        print(f"✅ Analyzing: {league_name} - {home} vs {away}", flush=True)
 
-            print(f"✅ Analyzing: {league_name} - {home} vs {away}", flush=True)
+        pred = get_predictions(fixture['fixture']['id'])
+        odds = get_odds(fixture['fixture']['id'])
 
-            pred = get_predictions(fixture['fixture']['id'])
-            odds = get_odds(fixture['fixture']['id'])
-
-            if pred and odds:
-                value_msg = calcul_value_bet(odds, pred, fixture['fixture']['id'])
-                if value_msg:
-                    count_value += 1
-                    injuries = get_injuries(fixture['fixture']['id'])
-                    msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
-                    envoyer_notification(msg, fixture['fixture']['id'], country, league_name, date_time)
+        if pred and odds:
+            value_msg = calcul_value_bet(odds, pred, fixture['fixture']['id'])
+            if value_msg:
+                count_value += 1
+                injuries = get_injuries(fixture['fixture']['id'])
+                msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
+                envoyer_notification(msg, fixture['fixture']['id'], country, league_name, date_time)
 
     print(f"🔍 Analyse terminée: {count_analyzed} analysés | {count_value} value bets trouvés\n", flush=True)
 
@@ -222,7 +206,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS Bot PROD DEFINITIVE Running"
+    return "🤖 APEX-SIRIUS Bot PROD FINALE Running 24/7"
 
 @app.route('/ping')
 def ping():
@@ -240,7 +224,7 @@ def dashboard():
     <html><head><title>APEX Dashboard</title>
     <meta http-equiv="refresh" content="30">
     <style>body{font-family:Arial;background:#111;color:#eee;padding:20px;}</style></head>
-    <body><h1>🚀 APEX-SIRIUS Dashboard PROD</h1>
+    <body><h1>🚀 APEX-SIRIUS Dashboard PROD FINALE</h1>
     {% for bet in history %}<div><b>{{ bet.time }}</b><pre>{{ bet.message }}</pre></div><hr>{% endfor %}
     </body></html>
     """
