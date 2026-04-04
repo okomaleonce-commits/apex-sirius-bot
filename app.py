@@ -8,7 +8,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime, timezone, timedelta
 
-print("🚀 APEX-SIRIUS vPROD-FINALE - CORRECTION TIMEZONE + TRI", flush=True)
+print("🚀 APEX-SIRIUS vPROD-STABLE - QUOTA SAVER + FILTRE LIGUES", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -17,8 +17,6 @@ API_KEY = os.environ.get("API_KEY")
 
 if not all([BOT_TOKEN, CHAT_ID, API_KEY]):
     print("❌ ERREUR CRITIQUE: Variables manquantes", flush=True)
-else:
-    print("✅ Configuration chargée", flush=True)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 BASE_URL = "https://v3.football.api-sports.io"
@@ -28,6 +26,15 @@ sent_alerts = set()
 value_bets_history = []
 debug_structure_logged = False
 
+# ====================== FILTRE LIGUES ======================
+# Seules ces ligues seront analysées
+ALLOWED_LEAGUES = {
+    "Premier League", "Championship", "La Liga", "Segunda División",
+    "Bundesliga", "2. Bundesliga", "Serie A", "Serie B",
+    "Ligue 1", "Ligue 2", "Eredivisie", "Primeira Liga", 
+    "Champions League", "Europa League", "Pro League", "Liga Portugal"
+}
+
 # ====================== API ======================
 def safe_api_call(url):
     try:
@@ -35,7 +42,7 @@ def safe_api_call(url):
         if resp.status_code == 200:
             return resp.json()
         elif resp.status_code == 429:
-            print("🛑 QUOTA ATTEINT (429) - Arrêt des appels", flush=True)
+            print("🛑 QUOTA ATTEINT (429)", flush=True)
         else:
             print(f"⚠️ API Erreur {resp.status_code}", flush=True)
     except Exception as e:
@@ -59,15 +66,6 @@ def get_odds(fixture_id):
     data = safe_api_call(url)
     return data.get('response', []) if data else []
 
-def get_injuries(fixture_id):
-    url = f"{BASE_URL}/injuries?fixture={fixture_id}"
-    data = safe_api_call(url)
-    if not data or not data.get('response'):
-        return "✅ Effectifs complets"
-    injuries = data['response']
-    # Note: structure injury ne contient pas fixture.home.id directement, mais on simplifie ici
-    return f"🩹 {len(injuries)} joueurs blessés listés"
-
 # ====================== CALCUL VALUE BET ======================
 def calcul_value_bet(odds_data, prediction, fixture):
     global debug_structure_logged
@@ -79,7 +77,6 @@ def calcul_value_bet(odds_data, prediction, fixture):
         preds = prediction.get('predictions', {})
         percent = preds.get('percent', {})
 
-        # Extraction des probabilités
         def get_pct(key):
             val = percent.get(key, '0')
             return float(str(val).replace('%', '')) / 100
@@ -91,9 +88,8 @@ def calcul_value_bet(odds_data, prediction, fixture):
         if pred_home + pred_draw + pred_away == 0:
             return None
 
-        edge = 0.02 # Seuil minimum de value (2%)
+        edge = 0.03 # Seuil de 3% pour éviter les faux positifs
 
-        # Parcours des cotes
         for bm in odds_data[0].get('bookmakers', []):
             if bm['name'].lower() not in ['pinnacle', 'betway', 'bet365']:
                 continue
@@ -104,18 +100,15 @@ def calcul_value_bet(odds_data, prediction, fixture):
                 if name == "Match Winner":
                     for v in vals:
                         odd = float(v['odd'])
-                        if odd < 1.40: continue
+                        if odd < 1.50: continue # Cotes trop basses ignorées
                         implied = 1 / odd
                         
                         if v['value'] == 'Home' and (pred_home - implied) > edge:
-                            values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs {odd} (edge +{((pred_home-implied)*100):.1f}%)")
+                            values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs {odd}")
                         elif v['value'] == 'Draw' and (pred_draw - implied) > edge:
                             values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs {odd}")
                         elif v['value'] == 'Away' and (pred_away - implied) > edge:
                             values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs {odd}")
-
-                # Ajoute ici d'autres marchés (Over, BTTS) si nécessaire...
-                
     except Exception as e:
         print(f"❌ Erreur calcul: {e}", flush=True)
 
@@ -124,8 +117,7 @@ def calcul_value_bet(odds_data, prediction, fixture):
 # ====================== NOTIFICATION ======================
 def envoyer_notification(message, fixture_id, country, league, date_time):
     alert_key = f"{fixture_id}_{hash(message)}"
-    if alert_key in sent_alerts:
-        return
+    if alert_key in sent_alerts: return
     sent_alerts.add(alert_key)
 
     full_msg = f"""🚨 APEX-SIRIUS VALUE BET
@@ -147,76 +139,54 @@ def envoyer_notification(message, fixture_id, country, league, date_time):
 def check_value_bets():
     print(f"\n⏰ Check lancé à {datetime.now().strftime('%H:%M:%S')}", flush=True)
     fixtures = get_fixtures()
-    if not fixtures:
-        print("Aucun match trouvé.", flush=True)
-        return
-
+    if not fixtures: return
+    
     print(f"📊 {len(fixtures)} matchs chargés.", flush=True)
 
-    # 1. Définition du temps actuel en UTC (obligatoire car API est en UTC)
     now = datetime.now(timezone.utc)
-    
     candidates = []
 
-    # 2. Filtrage et Tri
+    # 1. Filtrage Temporel
     for fixture in fixtures:
         status = fixture['fixture']['status']['short']
-        
-        # On ignore les matchs terminés
-        if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD', 'AWD', 'WO']:
-            continue
+        if status in ['FT', 'AET', 'PEN', 'CANC', 'PST', 'ABD']: continue
 
         try:
-            # Parsing de la date (Aware DateTime)
             match_date = datetime.fromisoformat(fixture['fixture']['date'].replace('Z', '+00:00'))
-            
-            # On garde les matchs qui commencent dans moins de 4h OU qui ont commencé il y a moins de 2h (Live)
-            # Tu peux ajuster ces valeurs
-            time_until_start = match_date - now
-            
-            # Si le match commence dans plus de 5h, on ignore (pour se concentrer sur le proche)
-            if time_until_start > timedelta(hours=5):
-                continue
-            
-            # Si le match est terminé ou trop vieux (commencé il y a + de 3h), on ignore
-            if match_date < (now - timedelta(hours=3)):
-                continue
-
-            candidates.append({
-                'fixture': fixture,
-                'date': match_date
-            })
-
-        except Exception as e:
-            # Debug si jamais une date est mal formatée
-            # print(f"Erreur date parsing: {e}") 
+            # Garde matchs dans les 2h à venir ou commencé il y a moins de 2h
+            if (match_date > now - timedelta(hours=2)) and (match_date < now + timedelta(hours=3)):
+                candidates.append({'fixture': fixture, 'date': match_date})
+        except:
             continue
 
-    # Tri par date (les plus proches d'abord)
+    # 2. Tri par date
     candidates.sort(key=lambda x: x['date'])
-
-    print(f"🗓️ {len(candidates)} matchs éligibles trouvés.", flush=True)
+    print(f"🗓️ {len(candidates)} matchs temporellement éligibles.", flush=True)
 
     count_analyzed = 0
     count_value = 0
     
-    # 3. Analyse (Limité à 20 pour le QUOTA GRATUIT)
-    # 20 matchs = 40 appels API. Il te reste de la marge pour la journée.
-    LIMIT = 20 
+    # 3. Analyse (LIMITÉ À 10 pour QUOTA)
+    LIMIT = 10 
     
     for item in candidates[:LIMIT]:
         fixture = item['fixture']
         fid = fixture['fixture']['id']
         
-        country = fixture.get('league', {}).get('country', 'N/A')
-        league_name = fixture.get('league', {}).get('name', 'N/A')
-        date_time = fixture['fixture']['date'][:16].replace('T', ' ')
-        home = fixture['teams']['home']['name']
-        away = fixture['teams']['away']['name']
+        league_name = fixture.get('league', {}).get('name', 'Inconnu')
+        country = fixture.get('league', {}).get('country', 'Inconnu')
+        
+        # ====================== FILTRE LIGUE RÉACTIVÉ ======================
+        if league_name not in ALLOWED_LEAGUES:
+            continue
+        # ==================================================================
 
         count_analyzed += 1
-        # Log minimal pour suivre
-        print(f"-> Analyse: {home} vs {away}", flush=True)
+        home = fixture['teams']['home']['name']
+        away = fixture['teams']['away']['name']
+        date_time = fixture['fixture']['date'][:16].replace('T', ' ')
+        
+        print(f"-> Analyse: {league_name} - {home} vs {away}", flush=True)
 
         pred = get_predictions(fid)
         odds = get_odds(fid)
@@ -225,11 +195,9 @@ def check_value_bets():
             value_msg = calcul_value_bet(odds, pred, fid)
             if value_msg:
                 count_value += 1
-                injuries = get_injuries(fid) # Appelé seulement si value bet trouvé
-                msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
+                msg = f"{home} vs {away}\n\n{value_msg}"
                 envoyer_notification(msg, fid, country, league_name, date_time)
         
-        # Pause pour ne pas spammer l'API trop vite
         time.sleep(0.5)
 
     print(f"✅ Terminé: {count_analyzed} analysés | {count_value} alertes.", flush=True)
@@ -239,18 +207,18 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS RUNNING"
+    return "🤖 APEX-SIRIUS RUNNING", 200
 
-@app.route('/test')
-def test():
-    check_value_bets()
-    return "Scan lancé", 200
+# CORRECTION ERREUR 404 UPTIMEROBOT
+@app.route('/ping', methods=['GET', 'HEAD'])
+def ping():
+    return "pong", 200
 
 @app.route('/dashboard')
 def dashboard():
     html = """
     <html><head><title>Dashboard</title>
-    <meta http-equiv="refresh" content="30">
+    <meta http-equiv="refresh" content="60">
     <style>body{font-family:Arial;background:#111;color:#eee;padding:20px;}</style></head>
     <body><h1>Dashboard</h1>
     {% for bet in history %}<div><b>{{ bet.time }}</b><pre>{{ bet.message }}</pre></div><hr>{% endfor %}
@@ -262,7 +230,11 @@ def run_scheduler():
     print("🗓️ Scheduler actif...", flush=True)
     time.sleep(5)
     check_value_bets()
-    schedule.every(30).minutes.do(check_value_bets)
+    # Toutes les 30 minutes = 48 checks/jour. 
+    # 10 matchs/check = 20 req * 48 = 960 req/jour. 
+    # ATTENTION: C'est juste sous la limite de 100 req/jour si on réduit à 2 matchs par check.
+    # Je recommande de passer à 1 check par heure pour être large.
+    schedule.every(1).hours.do(check_value_bets) 
     while True:
         schedule.run_pending()
         time.sleep(1)
