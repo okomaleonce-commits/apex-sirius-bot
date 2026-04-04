@@ -8,7 +8,7 @@ import threading
 from flask import Flask, render_template_string
 from datetime import datetime, timezone, timedelta
 
-print("🚀 APEX-SIRIUS vPRO-SUCCESS - MODE PRE-MATCH UNIQUEMENT", flush=True)
+print("🚀 APEX-SIRIUS vPRO-UNLIMITED - TOUTES LIGUES AUTORISÉES", flush=True)
 
 # ====================== CONFIG ======================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -25,13 +25,12 @@ HEADERS = {"x-apisports-key": API_KEY}
 sent_alerts = set()
 value_bets_history = []
 
-# ====================== FILTRE LIGUES ======================
-ALLOWED_LEAGUES = {
-    "Premier League", "Championship", "La Liga", "Segunda División",
-    "Bundesliga", "2. Bundesliga", "Serie A", "Serie B",
-    "Ligue 1", "Ligue 2", "Eredivisie", "Primeira Liga", 
-    "Champions League", "Europa League", "Pro League", "Liga Portugal",
-    "Conference League", "FA Cup", "Coppa Italia", "Copa del Rey"
+# ====================== FILTRE LIGUES (MODE NOIR) ======================
+# On ignore SEULEMENT les ligues inintéressantes (Amicaux, Jeunes, Féminines si tu veux, etc.)
+# On garde TOUT le reste (D2, D3, ligues exotiques) car c'est là qu'il y a de la valeur.
+BLACKLIST_LEAGUES = {
+    "Friendlies", "Club Friendlies", "Youth Leagues", "U20", "U19", "U18", "U17",
+    "UEFA Youth League", "Premier League 2", "MLS Next Pro"
 }
 
 # ====================== API ======================
@@ -95,7 +94,11 @@ def calcul_value_bet(odds_data, prediction, fixture):
         if pred_home + pred_draw + pred_away == 0:
             return None
 
-        edge = 0.03 # 3% minimum de value
+        edge = 0.03 # 3% minimum
+
+        # Vérification sécurité structure odds
+        if not odds_data or not odds_data[0].get('bookmakers'):
+            return None
 
         for bm in odds_data[0].get('bookmakers', []):
             if bm['name'].lower() not in ['pinnacle', 'betway', 'bet365', '1xbet']:
@@ -111,13 +114,11 @@ def calcul_value_bet(odds_data, prediction, fixture):
                         implied = 1 / odd
                         
                         if v['value'] == 'Home' and (pred_home - implied) > edge:
-                            values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs Cote {odd} (Edge +{((pred_home-implied)*100):.1f}%)")
+                            values.append(f"🏠 HOME VALUE : {pred_home*100:.1f}% vs Cote {odd}")
                         elif v['value'] == 'Draw' and (pred_draw - implied) > edge:
-                            values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs Cote {odd} (Edge +{((pred_draw-implied)*100):.1f}%)")
+                            values.append(f"⚖️ DRAW VALUE : {pred_draw*100:.1f}% vs Cote {odd}")
                         elif v['value'] == 'Away' and (pred_away - implied) > edge:
-                            values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs Cote {odd} (Edge +{((pred_away-implied)*100):.1f}%)")
-                
-                # Tu peux ajouter ici Over 2.5 etc...
+                            values.append(f"🏃 AWAY VALUE : {pred_away*100:.1f}% vs Cote {odd}")
                 
     except Exception as e:
         print(f"❌ Erreur calcul: {e}", flush=True)
@@ -126,14 +127,13 @@ def calcul_value_bet(odds_data, prediction, fixture):
 
 # ====================== NOTIFICATION ======================
 def envoyer_notification(message, fixture_id, country, league, date_time):
-    alert_key = f"{fixture_id}_{message[:20]}" # Key basée sur le début du msg pour update si value change
-    # Pour éviter le spam, on n'envoie qu'une alerte par match toutes les 30min
-    # Mais ici on garde simple : on envoie si pas déjà envoyé récemment
+    # Clé unique pour éviter le spam continu sur le même match
+    alert_key = f"{fixture_id}_{date_time}" 
     if alert_key in sent_alerts:
         return
     sent_alerts.add(alert_key)
 
-    full_msg = f"""🚨 APEX-SIRIUS PRE-MATCH ALERT
+    full_msg = f"""🚨 APEX-SIRIUS VALUE BET
 
 🌍 {country} | 🏆 {league}
 🕒 Kick-off: {date_time} (UTC)
@@ -159,35 +159,30 @@ def check_value_bets():
     now = datetime.now(timezone.utc)
     candidates = []
 
-    # 1. FILTRAGE TEMPOREL (CIBLE: PRE-MATCH)
+    # 1. FILTRAGE TEMPOREL
     for fixture in fixtures:
         status = fixture['fixture']['status']['short']
-        # On ignore tout ce qui n'est pas "Not Started" (NS) ou "Time To Be Defined" (TBD)
-        if status not in ["NS", "TBD"]:
+        if status not in ["NS", "TBD"]: # NS = Not Started
             continue
 
         try:
             match_date = datetime.fromisoformat(fixture['fixture']['date'].replace('Z', '+00:00'))
             
-            # LOGIQUE CLEF : Le match doit commencer dans moins de 1h
+            # Matchs dans moins de 1h
             time_until_start = match_date - now
             
-            # Si le match commence dans le futur (dans moins de 60 minutes)
             if timedelta(minutes=0) < time_until_start < timedelta(minutes=60):
                 candidates.append({'fixture': fixture, 'date': match_date})
         except:
             continue
 
-    # 2. TRI PAR IMMINENCE
+    # 2. TRI PAR DATE
     candidates.sort(key=lambda x: x['date'])
 
-    print(f"🎯 {len(candidates)} matchs PRE-MATCH (kick-off < 1h) détectés.", flush=True)
+    print(f"🎯 {len(candidates)} matchs PRE-MATCH détectés.", flush=True)
 
     count_analyzed = 0
     count_value = 0
-    
-    # Avec 7500 req/jour, on peut analyser tous les candidats pré-match
-    # Environ 30 matchs max par check = 60 requêtes. Largement dans les clous.
     
     for item in candidates:
         fixture = item['fixture']
@@ -196,15 +191,18 @@ def check_value_bets():
         league_name = fixture.get('league', {}).get('name', 'Inconnu')
         country = fixture.get('league', {}).get('country', 'Inconnu')
         
-        if league_name not in ALLOWED_LEAGUES:
+        # ====================== FILTRE NOIR ======================
+        # On ignore les ligues de la blackliste
+        if any(bl.lower() in league_name.lower() for bl in BLACKLIST_LEAGUES):
             continue
+        # =========================================================
 
         count_analyzed += 1
         home = fixture['teams']['home']['name']
         away = fixture['teams']['away']['name']
         date_time = fixture['fixture']['date'][:16].replace('T', ' ')
         
-        print(f"⏳ Analyse: {home} vs {away} (Kick-off imminent)", flush=True)
+        print(f"⏳ Analyse: {league_name} - {home} vs {away}", flush=True)
 
         pred = get_predictions(fid)
         odds = get_odds(fid)
@@ -213,7 +211,7 @@ def check_value_bets():
             value_msg = calcul_value_bet(odds, pred, fid)
             if value_msg:
                 count_value += 1
-                injuries = get_injuries(fid) # On peut se le permettre maintenant
+                injuries = get_injuries(fid) 
                 msg = f"{home} vs {away}\n\n{value_msg}\n\n{injuries}"
                 envoyer_notification(msg, fid, country, league_name, date_time)
         
@@ -226,7 +224,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS PRO RUNNING", 200
+    return "🤖 APEX-SIRIUS PRO UNLIMITED RUNNING", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
@@ -245,10 +243,9 @@ def dashboard():
     return render_template_string(html, history=value_bets_history[::-1])
 
 def run_scheduler():
-    print("🗓️ Scheduler actif (Check toutes les 15 min)...", flush=True)
+    print("🗓️ Scheduler actif...", flush=True)
     time.sleep(5)
     check_value_bets()
-    # Check toutes les 15 minutes pour capter les cotes avant match
     schedule.every(15).minutes.do(check_value_bets)
     while True:
         schedule.run_pending()
