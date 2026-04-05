@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v1.6 - 150 LEAGUES WHITELIST", 200
+    return "🤖 APEX-ENGINE v1.7 - ENRICHED MARKETS", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
@@ -26,7 +26,7 @@ def test_route():
     return "✅ Scan manuel lancé.", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v1.6 - EXTENDED CONFIG LOADING", flush=True)
+print("🚀 APEX-ENGINE v1.7 - STARTING", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -54,165 +54,32 @@ LEAGUE_AVG_GOALS = 2.65
 HOME_ADVANTAGE = 1.10
 RHO = 0.10
 
-# --- WHITELIST 150 LIGUES (V1.6) ---
+# --- WHITELIST 150 LIGUES ---
+# (Conservé identique pour lisibilité, voir v1.6 pour liste complète)
+TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
+TIER_N1 = ["premier league", "championship", "league one", "league two", "la liga", "la liga 2", "laliga smartbank", "bundesliga", "2. bundesliga", "3. liga", "ligue 1", "ligue 2", "serie a", "serie b", "liga portugal", "primeira liga", "liga portugal 2", "eredivisie", "eerste divisie", "jupiler pro league", "challenger pro league", "premiership", "scottish championship", "scottish league one"]
+TIER_N2 = ["süper lig", "super lig", "tff 1. lig", "russian premier league", "fnl", "ukrainian premier league", "persha liha", "super league 1", "super league 2", "super league greece", "bundesliga autrichienne", "2. liga autrichienne", "super league suisse", "challenge league suisse", "superliga", "1. division", "denmark superliga", "allsvenskan", "superettan", "eliteserien", "1. divisjon", "veikkausliiga", "ekstraklasa", "i liga", "czech first league", "czech national football league", "fortuna liga", "otp bank liga", "nemzeti bajnokság ii", "liga 1", "liga 2", "liga 1 romania", "superliga srbija", "prva liga", "hnl", "1. nl", "prva liga telekom", "prva liga slovenije", "premier league de bosnie", "first professional league", "second professional league", "kategoria superiore", "prva makedonska", "meridianbet", "1. cfl", "1re division chypriote", "cyprus division", "israeli premier league", "liga leumit", "league of ireland", "premier division", "nifl premiership", "cymru premier", "kazakhstan premier league", "azerbaijan premier league"]
+TIER_N3 = ["major league soccer", "usl championship", "liga mx", "liga de expansión mx", "liga profesional argentina", "primera nacional", "brasileirão série a", "brasileirão série b", "serie a brazil", "serie b brazil", "chilean primera división", "colombian primera a", "liga 1 perú", "campeonato uruguayo", "ligapro ecuador", "copa libertadores", "copa sudamericana", "j1 league", "j2 league", "k league 1", "k league 2", "chinese super league", "china super league", "chinese league one", "indian super league", "saudi pro league", "roshn saudi league", "uae arabian gulf league", "qatar stars league", "persian gulf pro league", "thai league 1", "malaysian super league", "singapore premier league", "v.league 1", "a-league", "a-league men", "nrfl", "afc champions league", "afc champions league elite", "afc cup"]
+TIER_N4 = ["botola pro", "caf champions league", "caf confederation cup", "egyptian premier league", "tunisian ligue professionnelle 1", "algerian ligue professionnelle 1", "premier soccer league", "psl", "libyan premier league", "nigerian premier football league", "kenyan premier league", "tanzanian premier league", "ugandan super league", "zambia super league", "zimbabwean premier soccer league", "cameroon elite one", "senegalese ligue 1", "mtn ligue 1", "côte d'ivoire", "ghanaian premier league", "jordan pro league", "lebanese premier league", "iraqi premier league", "bahraini premier league", "omani professional league", "kuwaiti premier league", "lithuanian a lyga", "latvian higher league", "estonian meistriliiga", "belarusian premier league", "moldovan national division", "georgian erovnuli liga", "armenian premier league"]
 
-# NIVEAU P0 — UEFA (3 Ligues)
-TIER_P0 = [
-    "uefa champions league", "uefa europa league", "uefa europa conference league"
-]
+BLACKLIST_KEYWORDS = ["u17", "u18", "u19", "u20", "u21", "u23", "ii", " b team", " b ", "reserves", "youth", "primavera", "jong", "amateur", "development", "academy", "filial", "reserve", "juniores", "sub-", "women", "womens"]
 
-# NIVEAU 1 — TOP EUROPE (22 Ligues)
-TIER_N1 = [
-    "premier league", "championship", "league one", "league two",
-    "la liga", "la liga 2", "laliga smartbank",
-    "bundesliga", "2. bundesliga", "3. liga",
-    "ligue 1", "ligue 2",
-    "serie a", "serie b",
-    "liga portugal", "primeira liga", "liga portugal 2",
-    "eredivisie", "eerste divisie",
-    "jupiler pro league", "challenger pro league",
-    "premiership", "scottish championship", "scottish league one"
-]
-
-# NIVEAU 2 — EUROPE SOLIDE (47 Ligues)
-TIER_N2 = [
-    "süper lig", "super lig", "tff 1. lig",
-    "russian premier league", "fnl",
-    "ukrainian premier league", "persha liha",
-    "super league 1", "super league 2", "super league greece",
-    "bundesliga autrichienne", "2. liga autrichienne",
-    "super league suisse", "challenge league suisse",
-    "superliga", "1. division", "denmark superliga",
-    "allsvenskan", "superettan",
-    "eliteserien", "1. divisjon",
-    "veikkausliiga",
-    "ekstraklasa", "i liga",
-    "czech first league", "czech national football league",
-    "fortuna liga",
-    "otp bank liga", "nemzeti bajnokság ii",
-    "liga 1", "liga 2", "liga 1 romania",
-    "superliga srbija", "prva liga",
-    "hnl", "1. nl",
-    "prva liga telekom", "prva liga slovenije",
-    "premier league de bosnie",
-    "first professional league", "second professional league",
-    "kategoria superiore",
-    "prva makedonska",
-    "meridianbet", "1. cfl",
-    "1re division chypriote", "cyprus division",
-    "israeli premier league", "liga leumit",
-    "league of ireland", "premier division",
-    "nifl premiership",
-    "cymru premier",
-    "kazakhstan premier league",
-    "azerbaijan premier league"
-]
-
-# NIVEAU 3 — AMÉRIQUES & ASIE (35 Ligues)
-TIER_N3 = [
-    "major league soccer", "usl championship",
-    "liga mx", "liga de expansión mx",
-    "liga profesional argentina", "primera nacional",
-    "brasileirão série a", "brasileirão série b", "serie a brazil", "serie b brazil",
-    "chilean primera división",
-    "colombian primera a",
-    "liga 1 perú",
-    "campeonato uruguayo",
-    "ligapro ecuador",
-    "copa libertadores", "copa sudamericana",
-    "j1 league", "j2 league",
-    "k league 1", "k league 2",
-    "chinese super league", "china super league", "chinese league one",
-    "indian super league",
-    "saudi pro league", "roshn saudi league",
-    "uae arabian gulf league",
-    "qatar stars league",
-    "persian gulf pro league",
-    "thai league 1",
-    "malaysian super league",
-    "singapore premier league",
-    "v.league 1",
-    "a-league", "a-league men",
-    "nrfl",
-    "afc champions league", "afc champions league elite", "afc cup"
-]
-
-# NIVEAU 4 — AFRIQUE & MOYEN-ORIENT (28 Ligues)
-TIER_N4 = [
-    "botola pro",
-    "caf champions league", "caf confederation cup",
-    "egyptian premier league",
-    "tunisian ligue professionnelle 1",
-    "algerian ligue professionnelle 1",
-    "premier soccer league", "psl",
-    "libyan premier league",
-    "nigerian premier football league",
-    "kenyan premier league",
-    "tanzanian premier league",
-    "ugandan super league",
-    "zambia super league",
-    "zimbabwean premier soccer league",
-    "cameroon elite one",
-    "senegalese ligue 1",
-    "mtn ligue 1", "côte d'ivoire",
-    "ghanaian premier league",
-    "jordan pro league",
-    "lebanese premier league",
-    "iraqi premier league",
-    "bahraini premier league",
-    "omani professional league",
-    "kuwaiti premier league",
-    "lithuanian a lyga",
-    "latvian higher league",
-    "estonian meistriliiga",
-    "belarusian premier league",
-    "moldovan national division",
-    "georgian erovnuli liga",
-    "armenian premier league"
-    # Note: N5 (Surveillance) exclu de la Whitelist pour auto-alertes
-]
-
-# --- BLACKLIST ---
-BLACKLIST_KEYWORDS = [
-    "u17", "u18", "u19", "u20", "u21", "u23", "u20", "u23",
-    "ii", " b team", " b ", "reserves", "youth", "primavera", "jong",
-    "amateur", "development", "academy", "filial", "reserve",
-    "juniores", "sub-", "women", "womens"
-]
-
-# --- SEUILS PAR NIVEAU (CONFIG TABLEAU) ---
-DCS_MIN_TIERS = {
-    "P0": 65, "N1": 65, "N2": 70, "N3": 75, "N4": 78
-}
-
-MARGE_MAX_TIERS = {
-    "P0": 0.07, "N1": 0.09, "N2": 0.11, "N3": 0.12, "N4": 0.13
-}
-
-EDGE_MIN_TIERS = {
-    "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06, "N4": 0.07
-}
-
+DCS_MIN_TIERS = { "P0": 65, "N1": 65, "N2": 70, "N3": 75, "N4": 78 }
+MARGE_MAX_TIERS = { "P0": 0.07, "N1": 0.09, "N2": 0.11, "N3": 0.12, "N4": 0.13 }
+EDGE_MIN_TIERS  = { "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06, "N4": 0.07 }
 COTE_MIN = 1.40
 COTE_MAX = 8.00
 
 # ====================== HELPERS ======================
 def get_league_tier(league_name, country):
     lname = league_name.lower()
-    
-    # 1. Blacklist Mots Clés
     for kw in BLACKLIST_KEYWORDS:
-        if kw in lname:
-            return "BLACKLIST"
-            
-    # 2. Check Whitelist (Ordre important: P0 -> N1 -> ... -> N4)
+        if kw in lname: return "BLACKLIST"
     if any(x in lname for x in TIER_P0): return "P0"
     if any(x in lname for x in TIER_N1): return "N1"
     if any(x in lname for x in TIER_N2): return "N2"
     if any(x in lname for x in TIER_N3): return "N3"
     if any(x in lname for x in TIER_N4): return "N4"
-    
-    # 3. Si pas dans la whitelist -> Gate-0 (Inconnu)
     return "UNKNOWN"
 
 def calculate_dcs(stats_home, stats_away, odds_data):
@@ -222,11 +89,7 @@ def calculate_dcs(stats_home, stats_away, odds_data):
         a_played = stats_away.get('fixtures', {}).get('played', {}).get('total', 0)
         if h_played < 5: score -= 20
         if a_played < 5: score -= 20
-        # Pénalité supplémentaire si données xG manquantes (rare mais possible)
-        if not stats_home.get('goals', {}).get('for', {}).get('total', {}).get('total'):
-            score -= 15
-    except: 
-        score -= 30
+    except: score -= 30
     if not odds_data or not odds_data[0].get('bookmakers'): score -= 20
     return max(0, score)
 
@@ -260,20 +123,30 @@ def poisson_prob(l, k):
     except: return 0
 
 def run_monte_carlo(hxg, axg):
-    probs = {"H": 0, "D": 0, "A": 0, "O25": 0}
+    # On ajoute BTTS (Les deux marquent)
+    probs = {"H": 0, "D": 0, "A": 0, "O25": 0, "U25": 0, "BTTS": 0}
     hp = [poisson_prob(hxg, i) for i in range(7)]
     ap = [poisson_prob(axg, i) for i in range(7)]
+    
     for h in range(7):
         for a in range(7):
             p = hp[h] * ap[a]
+            # Dixon-Coles
             if h == 0 and a == 0: p *= (1 - RHO)
             elif h == 1 and a == 0: p *= (1 + RHO)
             elif h == 0 and a == 1: p *= (1 + RHO)
             elif h == 1 and a == 1: p *= (1 - RHO)
+            
             if h > a: probs["H"] += p
             elif h == a: probs["D"] += p
             else: probs["A"] += p
+            
             if h+a >= 3: probs["O25"] += p
+            else: probs["U25"] += p
+            
+            # BTTS: Si les deux marquent au moins 1 but
+            if h >= 1 and a >= 1: probs["BTTS"] += p
+            
     return probs
 
 def analyze_markets(model_probs, odds_data, tier):
@@ -282,57 +155,95 @@ def analyze_markets(model_probs, odds_data, tier):
     
     bm = odds_data[0]['bookmakers'][0]
     odds_1x2 = {}
-    odds_ou = {}
+    
+    # Dictionnaire pour stocker les cotes des autres marchés
+    markets_found = {
+        "btts": None,
+        "ou25": None,
+        "ou15": None
+    }
     
     for bet in bm['bets']:
+        # 1. Extraction 1X2
         if bet['name'] == "Match Winner":
             for v in bet['values']: odds_1x2[v['value']] = float(v['odd'])
+            
+        # 2. Extraction BTTS
+        if bet['name'] == "Both Teams To Score":
+            for v in bet['values']:
+                if v['value'] == 'Yes':
+                    markets_found['btts'] = float(v['odd'])
+        
+        # 3. Extraction Over/Under
         if bet['name'] == "Goals Over/Under":
             for v in bet['values']:
-                if "Over 2.5" in v['value']: odds_ou['Over 2.5'] = float(v['odd'])
-
+                if "Over 2.5" in v['value']: markets_found['ou25'] = float(v['odd'])
+                if "Under 2.5" in v['value']: markets_found['u25'] = float(v['odd'])
+                if "Over 1.5" in v['value']: markets_found['ou15'] = float(v['odd'])
+                
+    # --- ANALYSE 1X2 ---
     if odds_1x2:
         margin = calculate_bookmaker_margin([odds_1x2.get('Home',0), odds_1x2.get('Draw',0), odds_1x2.get('Away',0)])
-        if margin > MARGE_MAX_TIERS[tier]: return []
+        if margin > MARGE_MAX_TIERS[tier]: return [] # Filtre marge
 
-    edge_min = EDGE_MIN_TIERS[tier]
+        edge_min = EDGE_MIN_TIERS[tier]
+        
+        # Home
+        if 'Home' in odds_1x2:
+            odd = odds_1x2['Home']
+            if COTE_MIN <= odd <= COTE_MAX:
+                implied = 1/odd
+                edge = model_probs['H'] - implied
+                if edge > edge_min:
+                    opportunities.append({"type": "1X2", "label": "HOME WIN", "odd": odd, "edge": edge, "proba_key": "H", "is_value": True})
+        
+        # Draw
+        if 'Draw' in odds_1x2:
+            odd = odds_1x2['Draw']
+            if COTE_MIN <= odd <= COTE_MAX:
+                implied = 1/odd
+                edge = model_probs['D'] - implied
+                if edge > edge_min:
+                    opportunities.append({"type": "1X2", "label": "DRAW", "odd": odd, "edge": edge, "proba_key": "D", "is_value": True})
+        
+        # Away
+        if 'Away' in odds_1x2:
+            odd = odds_1x2['Away']
+            if COTE_MIN <= odd <= COTE_MAX:
+                implied = 1/odd
+                edge = model_probs['A'] - implied
+                if edge > edge_min:
+                    opportunities.append({"type": "1X2", "label": "AWAY WIN", "odd": odd, "edge": edge, "proba_key": "A", "is_value": True})
+
+    # --- ANALYSE BTTS & OVER/UNDER (Pour la section "Autres marchés") ---
+    # Note: On ne filtre pas le Edge strict pour les autres marchés, on affiche l'info si dispo
     
-    # Check Home
-    if 'Home' in odds_1x2:
-        odd = odds_1x2['Home']
-        if COTE_MIN <= odd <= COTE_MAX:
-            implied = 1 / odd
-            edge = model_probs['H'] - implied
-            is_val = edge > edge_min
-            opportunities.append({"type": "1X2", "label": "HOME WIN", "odd": odd, "edge": edge, "proba_key": "H", "is_value": is_val})
-
-    # Check Draw
-    if 'Draw' in odds_1x2:
-        odd = odds_1x2['Draw']
-        if COTE_MIN <= odd <= COTE_MAX:
-            implied = 1 / odd
-            edge = model_probs['D'] - implied
-            is_val = edge > edge_min
-            opportunities.append({"type": "1X2", "label": "DRAW", "odd": odd, "edge": edge, "proba_key": "D", "is_value": is_val})
-            
-    # Check Away
-    if 'Away' in odds_1x2:
-        odd = odds_1x2['Away']
-        if COTE_MIN <= odd <= COTE_MAX:
-            implied = 1 / odd
-            edge = model_probs['A'] - implied
-            is_val = edge > edge_min
-            opportunities.append({"type": "1X2", "label": "AWAY WIN", "odd": odd, "edge": edge, "proba_key": "A", "is_value": is_val})
-            
-    # Check Over 2.5
-    if 'Over 2.5' in odds_ou:
-        odd = odds_ou['Over 2.5']
-        if odd >= COTE_MIN:
+    # BTTS
+    if markets_found['btts']:
+        odd = markets_found['btts']
+        if odd >= 1.40:
+            prob = model_probs['BTTS']
             implied = 1/odd
-            edge = model_probs['O25'] - implied
-            is_val = edge > edge_min
-            opportunities.append({"type": "OU", "label": "Over 2.5", "odd": odd, "edge": edge, "proba_key": "O25", "is_value": is_val})
-                
+            edge = prob - implied
+            # On ajoute dans les opportunities pour info, avec flag is_value
+            opportunities.append({"type": "GOAL", "label": "BTTS Oui", "odd": odd, "edge": edge, "is_value": edge > 0.03})
+            
+    # Under 2.5
+    if markets_found.get('u25'):
+        odd = markets_found['u25']
+        prob = model_probs['U25']
+        implied = 1/odd
+        edge = prob - implied
+        opportunities.append({"type": "GOAL", "label": "Under 2.5", "odd": odd, "edge": edge, "is_value": edge > 0.03})
+
+    # Over 2.5
+    if markets_found.get('ou25'):
+        odd = markets_found['ou25']
+        prob = model_probs['O25']
+        implied = 1/odd
+        edge = prob - implied
+        opportunities.append({"type": "GOAL", "label": "Over 2.5", "odd": odd, "edge": edge, "is_value": edge > 0.03})
+
     return opportunities
 
 def get_strong_signal(home_xg, away_xg, probs):
@@ -390,9 +301,6 @@ def check_results(fixtures_today):
 ------------------------"""
                 report_lines.append(line)
                 finished_bets.append(bet)
-            
-            elif status in ['CANC', 'PST', 'ABD']:
-                finished_bets.append(bet)
             else:
                 still_pending.append(bet)
         else:
@@ -414,8 +322,10 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg)
     if key in sent_alerts: return
     sent_alerts.add(key)
 
-    value_bets = [o for o in opps if o['is_value']]
-    info_bets = [o for o in opps if not o['is_value']]
+    # Séparation Value Bet Principal vs Autres Infos
+    # Le "Value Bet" principal doit être 1X2 pour le suivi
+    value_bets = [o for o in opps if o['is_value'] and o['type'] == "1X2"]
+    goal_markets = [o for o in opps if o['type'] == "GOAL"] # BTTS, Over, Under
 
     msg = f"""⚽ SOCCER ⚽
 
@@ -431,12 +341,9 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg)
     if value_bets:
         main = value_bets[0]
         selection_name = ""
-        if main['type'] == "1X2":
-            if main['label'] == "HOME WIN": selection_name = fixture_info['home']
-            elif main['label'] == "AWAY WIN": selection_name = fixture_info['away']
-            else: selection_name = "Draw"
-        else:
-            selection_name = main['label']
+        if main['label'] == "HOME WIN": selection_name = fixture_info['home']
+        elif main['label'] == "AWAY WIN": selection_name = fixture_info['away']
+        else: selection_name = "Draw"
 
         msg += f"""
 🚨 VALUE BET DETECTED 🚨
@@ -450,18 +357,16 @@ Edge: +{main['edge']*100:.1f}%
             "signal_name": selection_name, "prediction_type": main['proba_key'], "odd": main['odd']
         })
     else:
-        msg += "\n📉 VALUE BET: Aucune value significative détectée.\n"
+        msg += "\n📉 VALUE BET: Aucune value 1X2 significative (Edge < seuil).\n"
 
-    if info_bets:
+    # Section Autres Marchés Probables
+    if goal_markets:
         msg += "\n💡 Autres marchés probables:\n"
-        for o in info_bets[:2]:
-            name = o['label']
-            if o['type'] == "1X2":
-                 if o['label'] == "HOME WIN": name = fixture_info['home']
-                 elif o['label'] == "AWAY WIN": name = fixture_info['away']
-                 else: name = "Draw"
-            prob_pct = o['edge'] + (1/o['odd'])
-            msg += f"▪ {name} @ {o['odd']:.2f} (Proba {prob_pct*100:.0f}%)\n"
+        for o in goal_markets:
+            # Affiche le marché avec l'edge positif ou juste l'info
+            status = "✅" if o['is_value'] else "▪"
+            prob_pct = (o['edge'] + (1/o['odd'])) * 100
+            msg += f"{status} {o['label']} @ {o['odd']:.2f} (Proba {prob_pct:.0f}%)\n"
 
     try:
         bot.send_message(CHAT_ID, msg)
@@ -473,7 +378,7 @@ Edge: +{main['edge']*100:.1f}%
 # ====================== CHECK ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v1.6 à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v1.7 à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
     
     fixtures = get_fixtures()
     if not fixtures: return
@@ -492,11 +397,9 @@ def check_value_bets():
         lname = f['league']['name']
         country = f['league']['country']
         tier = get_league_tier(lname, country)
-        
-        # IMPORTANT: On ignore UNKNOWN et BLACKLIST (ce qui inclut N5 manuel)
         if tier in ["BLACKLIST", "UNKNOWN"]: continue
         
-        if count >= 20: break # Limité à 20 pour le quota API
+        if count >= 20: break
         count += 1
         
         fid = f['fixture']['id']
@@ -512,7 +415,6 @@ def check_value_bets():
         odds = get_odds(fid)
         dcs = calculate_dcs(s_home, s_away, odds)
         
-        # Vérification DCS par Tier
         if dcs < DCS_MIN_TIERS[tier]: continue
         
         try:
@@ -528,6 +430,7 @@ def check_value_bets():
             opportunities = analyze_markets(probs, odds, tier)
             signal = get_strong_signal(hxg, axg, probs)
             
+            # Envoie notif si Value Bet 1X2 OU si marché de but intéressant (BTTS/O-U)
             if any(o['is_value'] for o in opportunities):
                 info = {
                     'id': fid, 'league': lname, 'country': country,
@@ -555,4 +458,4 @@ if bot:
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.ru
