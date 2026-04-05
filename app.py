@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v1.4 - TRACKING SYSTEM", 200
+    return "🤖 APEX-ENGINE v1.5 - DUAL SIGNAL SYSTEM", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
@@ -26,7 +26,7 @@ def test_route():
     return "✅ Scan manuel lancé.", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v1.4 - STARTING TRACKING MODULE", flush=True)
+print("🚀 APEX-ENGINE v1.5 - DUAL SIGNAL (VALUE + TREND)", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -45,10 +45,9 @@ else:
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-# --- DATA STORES ---
 sent_alerts = set()
 value_bets_history = []
-tracked_bets = [] # Nouveau: Liste des paris en cours de suivi
+tracked_bets = []
 
 # ====================== A-LAP CONFIGURATION ======================
 LEAGUE_AVG_GOALS = 2.65
@@ -166,228 +165,12 @@ def analyze_markets(model_probs, odds_data, tier):
         if odd < COTE_MIN or odd > COTE_MAX: continue
         implied = 1 / odd
         edge = model_probs[proba_key] - implied
-        if edge > edge_min:
-            opportunities.append({"type": "1X2", "label": label, "odd": odd, "edge": edge, "proba_key": proba_key})
+        # On capture les opportunités même si edge est faible pour info, 
+        # mais on ne proposera en "Value Bet" que si > edge_min
+        opportunities.append({"type": "1X2", "label": label, "odd": odd, "edge": edge, "proba_key": proba_key, "is_value": edge > edge_min})
             
     if 'Over 2.5' in odds_ou:
         odd = odds_ou['Over 2.5']
         if odd >= COTE_MIN:
             implied = 1/odd
-            edge = model_probs['O25'] - implied
-            if edge > edge_min:
-                opportunities.append({"type": "OU", "label": "Over 2.5", "odd": odd, "edge": edge, "proba_key": "O25"})
-                
-    return opportunities
-
-# ====================== RESULT TRACKER (NEW) ======================
-def check_results(fixtures_today):
-    global tracked_bets
-    if not tracked_bets: return
-
-    finished_bets = []
-    still_pending = []
-    report_lines = []
-    
-    for bet in tracked_bets:
-        # Chercher le match dans la liste du jour
-        match_data = next((m for m in fixtures_today if m['fixture']['id'] == bet['fid']), None)
-        
-        if match_data:
-            status = match_data['fixture']['status']['short']
-            
-            if status in ['FT', 'AET', 'PEN']: # Match Terminé
-                score_home = match_data['goals']['home']
-                score_away = match_data['goals']['away']
-                total_goals = score_home + score_away
-                
-                # Calcul Victoire
-                is_win = False
-                p_type = bet['prediction_type']
-                
-                if p_type == "H" and score_home > score_away: is_win = True
-                elif p_type == "D" and score_home == score_away: is_win = True
-                elif p_type == "A" and score_home < score_away: is_win = True
-                elif p_type == "O25" and total_goals >= 3: is_win = True
-                
-                result_icon = "✅ GAGNÉ" if is_win else "❌ PERDU"
-                
-                # Formatage Rapport
-                line = f"""📅 {bet['date']}
-🏆 {bet['league']}
-⚽ {bet['home']} vs {bet['away']}
-
-🔮 Signal: {bet['signal_name']} @ {bet['odd']:.2f}
-🏁 Score Final: {score_home} - {score_away}
-{result_icon}
-------------------------"""
-                report_lines.append(line)
-                finished_bets.append(bet)
-            
-            elif status in ['CANC', 'PST', 'ABD']:
-                report_lines.append(f"⚠️ ANNULÉ: {bet['home']} vs {bet['away']} ({bet['league']})")
-                finished_bets.append(bet)
-            else:
-                still_pending.append(bet)
-        else:
-            # Si le match n'est pas dans la liste du jour (peut-être hier ou demain), on garde
-            # Pour simplifier, on garde en pending s'il n'est pas trouvé aujourd'hui
-            still_pending.append(bet)
-
-    # Mise à jour de la liste globale
-    tracked_bets = still_pending
-    
-    # Envoi du rapport Telegram si des matchs sont finis
-    if report_lines:
-        header = "📊 RÉSULTATS DES PRÉCÉDENTS PARIS 📊\n\n"
-        full_report = header + "\n".join(report_lines)
-        try:
-            if bot:
-                bot.send_message(CHAT_ID, full_report)
-        except: pass
-
-# ====================== NOTIFICATION ======================
-def envoyer_notification(opps, fixture_info, dcs, tier):
-    if not bot: return
-    fid = fixture_info['id']
-    key = f"{fid}"
-    if key in sent_alerts: return
-    sent_alerts.add(key)
-
-    opps.sort(key=lambda x: x['edge'], reverse=True)
-    main = opps[0]
-    alts = opps[1:]
-
-    # Formatage Nom Sélection
-    if main['type'] == "1X2":
-        if main['label'] == "HOME WIN": selection_name = fixture_info['home']
-        elif main['label'] == "AWAY WIN": selection_name = fixture_info['away']
-        else: selection_name = "Draw"
-    else:
-        selection_name = main['label']
-
-    msg = f"""⚽ SOCCER ⚽
-
-Selection: {selection_name}
-
-Min. Odds: 🚀{main['odd']:.2f}🚀
-
-{fixture_info['home']} vs {fixture_info['away']}
-{fixture_info['country']} - {fixture_info['league']}
-{fixture_info['date']} (UTC)
-
-📡 APEX Signal: DCS {dcs}/100 | Edge +{main['edge']*100:.1f}%
-"""
-
-    # Enregistrement pour le suivi futur
-    tracked_bets.append({
-        "fid": fid,
-        "home": fixture_info['home'],
-        "away": fixture_info['away'],
-        "league": fixture_info['league'],
-        "date": fixture_info['date'],
-        "signal_name": selection_name,
-        "prediction_type": main['proba_key'], # H, D, A, O25
-        "odd": main['odd']
-    })
-
-    if alts:
-        msg += "\nAlternatives:\n"
-        for alt in alts:
-            alt_name = alt['label']
-            if alt['type'] == "1X2":
-                 if alt['label'] == "HOME WIN": alt_name = fixture_info['home']
-                 elif alt['label'] == "AWAY WIN": alt_name = fixture_info['away']
-                 else: alt_name = "Draw"
-            msg += f"▪ {alt_name} --> {alt['odd']:.2f}\n"
-
-    try:
-        bot.send_message(CHAT_ID, msg)
-        value_bets_history.append({"time": datetime.now().strftime("%H:%M"), "message": msg})
-        print(f"✅ Telegram envoyé pour {fid}", flush=True)
-    except Exception as e:
-        print(f"❌ Erreur Telegram: {e}", flush=True)
-
-# ====================== CHECK ======================
-def check_value_bets():
-    if not API_KEY: return
-    print(f"\n⏰ Check v1.4 à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
-    
-    fixtures = get_fixtures()
-    if not fixtures: return
-    
-    # 1. Vérifier les résultats passés
-    check_results(fixtures)
-    
-    # 2. Analyse des nouveaux matchs
-    now = datetime.now(timezone.utc)
-    count = 0
-    
-    for f in fixtures:
-        try:
-            m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
-            if not (timedelta(minutes=0) < (m_date - now) < timedelta(minutes=60)): continue
-        except: continue
-
-        lname = f['league']['name']
-        country = f['league']['country']
-        tier = get_league_tier(lname, country)
-        if tier in ["BLACKLIST", "UNKNOWN"]: continue
-        
-        if count >= 15: break
-        count += 1
-        
-        fid = f['fixture']['id']
-        lid = f['league']['id']
-        season = f['league']['season']
-        ht = f['teams']['home']
-        at = f['teams']['away']
-        
-        s_home = get_team_stats(ht['id'], lid, season)
-        s_away = get_team_stats(at['id'], lid, season)
-        if not s_home or not s_away: continue
-        
-        odds = get_odds(fid)
-        dcs = calculate_dcs(s_home, s_away, odds)
-        
-        if dcs < DCS_MIN_TIERS[tier]: continue
-        
-        try:
-            h_avg = s_home['goals']['for']['total']['total'] / s_home['fixtures']['played']['total']
-            h_conc = s_home['goals']['against']['total']['total'] / s_home['fixtures']['played']['total']
-            a_avg = s_away['goals']['for']['total']['total'] / s_away['fixtures']['played']['total']
-            a_conc = s_away['goals']['against']['total']['total'] / s_away['fixtures']['played']['total']
-            
-            hxg = (h_avg / LEAGUE_AVG_GOALS) * (a_conc / LEAGUE_AVG_GOALS) * LEAGUE_AVG_GOALS * HOME_ADVANTAGE
-            axg = (a_avg / LEAGUE_AVG_GOALS) * (h_conc / LEAGUE_AVG_GOALS) * LEAGUE_AVG_GOALS
-            
-            probs = run_monte_carlo(hxg, axg)
-            opportunities = analyze_markets(probs, odds, tier)
-            
-            if opportunities:
-                info = {
-                    'id': fid, 'league': lname, 'country': country,
-                    'home': ht['name'], 'away': at['name'],
-                    'date': f['fixture']['date'][:16].replace('T', ' ')
-                }
-                envoyer_notification(opportunities, info, dcs, tier)
-            
-        except: continue
-        time.sleep(0.5)
-        
-    print(f"✅ Check terminé: {count} analysés.", flush=True)
-
-# ====================== SCHEDULER ======================
-def run_scheduler():
-    time.sleep(60)
-    check_value_bets()
-    schedule.every(15).minutes.do(check_value_bets)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-
-if bot:
-    threading.Thread(target=run_scheduler, daemon=True).start()
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+            edge = model_probs['
