@@ -9,19 +9,24 @@ import math
 from flask import Flask, render_template_string
 from datetime import datetime, timezone, timedelta
 
-# ====================== FLASK APP (EN PREMIER) ======================
+# ====================== FLASK APP ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v1.2 - WHITELIST STRATIFIED", 200
+    return "🤖 APEX-ENGINE v1.3 - SHOOTING STYLE", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
+@app.route('/test')
+def test_route():
+    threading.Thread(target=check_value_bets).start()
+    return "✅ Scan manuel lancé.", 200
+
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v1.2 - INITIALIZING WHITELIST PROTOCOL", flush=True)
+print("🚀 APEX-ENGINE v1.3 - SHOOTING NOTIFICATION STYLE", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -49,127 +54,59 @@ HOME_ADVANTAGE = 1.10
 RHO = 0.10
 
 # --- WHITELIST & TIERS ---
-# Niveau P0: Top Confiance
-TIER_P0 = [
-    "uefa champions league", "uefa europa league", "uefa europa conference league"
-]
+TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
+TIER_N1 = ["premier league", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "scottish premiership", "jupiler pro league", "süper lig", "super lig", "eerste divisie", "rpl", "premier league russia", "super league greece"]
+TIER_N2 = ["championship", "la liga 2", "laliga smartbank", "2. bundesliga", "ligue 2", "serie b", "liga portugal 2", "scottish championship", "challenger pro league", "tff 1. lig", "tweede divisie", "liga 1 romania", "österreichische bundesliga", "super league suisse", "superliga denmark", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "superliga srbija", "hnl", "fortuna liga", "first professional league", "premier league ukraine", "israeli premier league"]
+TIER_N3 = ["league one", "league two", "national league", "primera rfef", "3. liga", "national france", "serie c", "liga 3", "liga profesional argentina", "serie a brazil", "liga mx", "major league soccer", "j1 league", "k league 1", "saudi pro league", "arabian gulf league", "a-league", "premier soccer league", "ligue professionnelle 1", "mtn ligue 1"]
 
-# Niveau N1: Top 5 + Premium
-TIER_N1 = [
-    "premier league", "la liga", "bundesliga", "ligue 1", "serie a", 
-    "eredivisie", "liga portugal", "primeira liga", "scottish premiership", 
-    "jupiler pro league", "süper lig", "super lig", "eerste divisie",
-    "rpl", "premier league russia", "super league greece"
-]
+BLACKLIST_COUNTRIES = ["jordan", "indonesia", "vietnam", "kazakhstan", "azerbaijan", "georgia", "armenia", "belarus", "moldova", "kosovo", "malta", "cyprus", "faroe islands", "gibraltar", "san marino", "liechtenstein"]
+BLACKLIST_KEYWORDS = ["u17", "u18", "u19", "u20", "u21", "u23", "ii", " b", "reserves", "youth", "primavera", "jong", "amateur", "development", "academy", "women", "womens"]
 
-# Niveau N2: D2 Fiables
-TIER_N2 = [
-    "championship", "la liga 2", "laliga smartbank", "2. bundesliga", "ligue 2", 
-    "serie b", "liga portugal 2", "scottish championship", "challenger pro league",
-    "tff 1. lig", "tweede divisie", "liga 1 romania", "österreichische bundesliga",
-    "super league suisse", "superliga denmark", "allsvenskan", "eliteserien", 
-    "ekstraklasa", "czech first league", "otp bank liga", "superliga srbija",
-    "hnl", "fortuna liga", "first professional league", "premier league ukraine",
-    "israeli premier league"
-]
-
-# Niveau N3: Conditionnelles (DCS >= 75)
-TIER_N3 = [
-    "league one", "league two", "national league", "primera rfef", "3. liga",
-    "national france", "serie c", "liga 3", "liga profesional argentina",
-    "serie a brazil", "liga mx", "major league soccer", "j1 league", "k league 1",
-    "saudi pro league", "arabian gulf league", "a-league", "premier soccer league",
-    "ligue professionnelle 1", "mtn ligue 1"
-]
-
-# --- BLACKLIST ---
-BLACKLIST_COUNTRIES = [
-    "jordan", "indonesia", "vietnam", "kazakhstan", "azerbaijan", "georgia", 
-    "armenia", "belarus", "moldova", "kosovo", "malta", "cyprus", "faroe islands", 
-    "gibraltar", "san marino", "liechtenstein"
-    # Note: On filtre par pays pour couvrir les ligues non listées
-]
-
-BLACKLIST_KEYWORDS = [
-    "u17", "u18", "u19", "u20", "u21", "u23", "ii", " b", "reserves", "youth", 
-    "primavera", "jong", "amateur", "development", "academy", "women", "womens"
-]
-
-# --- SEUILS PAR NIVEAU ---
 DCS_MIN_TIERS = { "P0": 65, "N1": 65, "N2": 70, "N3": 75 }
 MARGE_MAX_TIERS = { "P0": 0.07, "N1": 0.09, "N2": 0.11, "N3": 0.12 }
-EDGE_MIN_TIERS  = { "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06 } # 6% pour N3
+EDGE_MIN_TIERS  = { "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06 }
 
 COTE_MIN = 1.40
 COTE_MAX = 8.00
 
-# ====================== HELPER FUNCTIONS ======================
-
+# ====================== HELPERS ======================
 def get_league_tier(league_name, country):
-    """Identifie le tier de la ligue"""
     lname = league_name.lower()
-    
-    # 1. Check Blacklist Mots Clés
     for kw in BLACKLIST_KEYWORDS:
-        if kw in lname:
-            return "BLACKLIST"
-            
-    # 2. Check Blacklist Pays (si pas dans Whitelist explicite)
-    # Note: on autorise CIV et Tunisie si dans TIER_N3
-    if country.lower() in BLACKLIST_COUNTRIES:
-        return "BLACKLIST"
-
-    # 3. Check Whitelist
+        if kw in lname: return "BLACKLIST"
+    if country.lower() in BLACKLIST_COUNTRIES: return "BLACKLIST"
     if any(x in lname for x in TIER_P0): return "P0"
     if any(x in lname for x in TIER_N1): return "N1"
     if any(x in lname for x in TIER_N2): return "N2"
     if any(x in lname for x in TIER_N3): return "N3"
-    
-    # 4. Si pas trouvé, c'est une ligue inconnue (Gate-0)
     return "UNKNOWN"
 
 def calculate_dcs(stats_home, stats_away, odds_data):
-    """Calcule le score de confiance des données (0-100)"""
     score = 100
-    
-    # Pénalité si peu de matchs joués (saison débutante)
     try:
-        h_played = stats_home.get('fixtures', {}).get('played', {}).get('total', 0)
-        a_played = stats_away.get('fixtures', {}).get('played', {}).get('total', 0)
-        if h_played < 5: score -= 20
-        if a_played < 5: score -= 20
-    except:
-        score -= 30 # Données manquantes
-
-    # Pénalité si pas de cotes fiables
-    if not odds_data or not odds_data[0].get('bookmakers'):
-        score -= 20
-    
+        if stats_home.get('fixtures', {}).get('played', {}).get('total', 0) < 5: score -= 20
+        if stats_away.get('fixtures', {}).get('played', {}).get('total', 0) < 5: score -= 20
+    except: score -= 30
+    if not odds_data or not odds_data[0].get('bookmakers'): score -= 20
     return max(0, score)
 
 def calculate_bookmaker_margin(odds_1x2):
-    """Calcule la marge du bookmaker (overround)"""
     try:
-        # odds_1x2 = [odd_home, odd_draw, odd_away]
-        if not all(odds_1x2): return 1.0 # Invalide
-        margin = (1/odds_1x2[0]) + (1/odds_1x2[1]) + (1/odds_1x2[2])
-        return margin - 1.0
-    except:
-        return 1.0
+        if not all(odds_1x2): return 1.0
+        return sum([1/o for o in odds_1x2]) - 1.0
+    except: return 1.0
 
-# ====================== API HANDLER ======================
+# ====================== API ======================
 def safe_api_call(url):
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         if resp.status_code == 200: return resp.json()
         if resp.status_code == 429: print("🛑 QUOTA ATTEINT", flush=True)
-    except Exception as e:
-        print(f"⚠️ API Exception: {e}", flush=True)
+    except: pass
     return None
 
 def get_fixtures():
-    today = time.strftime("%Y-%m-%d")
-    return safe_api_call(f"{BASE_URL}/fixtures?date={today}").get('response', [])
+    return safe_api_call(f"{BASE_URL}/fixtures?date={time.strftime('%Y-%m-%d')}").get('response', [])
 
 def get_team_stats(tid, lid, season):
     return safe_api_call(f"{BASE_URL}/teams/statistics?team={tid}&league={lid}&season={season}").get('response')
@@ -177,94 +114,147 @@ def get_team_stats(tid, lid, season):
 def get_odds(fid):
     return safe_api_call(f"{BASE_URL}/odds?fixture={fid}").get('response', [])
 
-# ====================== APEX ENGINE CORE ======================
-
+# ====================== ENGINE ======================
 def poisson_prob(l, k):
     try: return (math.exp(-l) * (l ** k)) / math.factorial(k)
     except: return 0
 
 def run_monte_carlo(hxg, axg):
-    probs = {"H": 0, "D": 0, "A": 0}
+    probs = {"H": 0, "D": 0, "A": 0, "O25": 0}
     hp = [poisson_prob(hxg, i) for i in range(7)]
     ap = [poisson_prob(axg, i) for i in range(7)]
-    
     for h in range(7):
         for a in range(7):
             p = hp[h] * ap[a]
-            # Dixon-Coles correction
             if h == 0 and a == 0: p *= (1 - RHO)
             elif h == 1 and a == 0: p *= (1 + RHO)
             elif h == 0 and a == 1: p *= (1 + RHO)
             elif h == 1 and a == 1: p *= (1 - RHO)
-            
             if h > a: probs["H"] += p
             elif h == a: probs["D"] += p
             else: probs["A"] += p
+            if h+a >= 3: probs["O25"] += p
     return probs
 
-def calculate_value_bet(model_probs, odds_data, tier):
-    values = []
-    try:
-        if not odds_data or not odds_data[0].get('bookmakers'): return None
-        bm = odds_data[0]['bookmakers'][0] # Prendre le 1er bookmaker (Pinnacle si possible)
-        
-        # Extraction cotes 1X2
-        odds_vals = {}
-        for bet in bm['bets']:
-            if bet['name'] == "Match Winner":
-                for v in bet['values']:
-                    odds_vals[v['value']] = float(v['odd'])
-        
-        if len(odds_vals) != 3: return None
-        
-        # Calcul Marge
-        margin = calculate_bookmaker_margin([odds_vals.get('Home',0), odds_vals.get('Draw',0), odds_vals.get('Away',0)])
-        if margin > MARGE_MAX_TIERS[tier]:
-            return None # Marge trop élevée (cotes pièges)
+def analyze_markets(model_probs, odds_data, tier):
+    """Retourne une liste de paris value trouvés (structurée)"""
+    opportunities = []
+    if not odds_data or not odds_data[0].get('bookmakers'): return []
+    
+    bm = odds_data[0]['bookmakers'][0] # Focus Pinnacle ou 1er sharp
+    
+    # Extraction des cotes
+    odds_1x2 = {}
+    odds_ou = {}
+    
+    for bet in bm['bets']:
+        if bet['name'] == "Match Winner":
+            for v in bet['values']: odds_1x2[v['value']] = float(v['odd'])
+        if bet['name'] == "Goals Over/Under":
+            for v in bet['values']:
+                if "Over 2.5" in v['value']: odds_ou['Over 2.5'] = float(v['odd'])
+                if "Under 2.5" in v['value']: odds_ou['Under 2.5'] = float(v['odd'])
 
-        # Check Value
-        edge_min = EDGE_MIN_TIERS[tier]
+    # Check Margin
+    if odds_1x2:
+        margin = calculate_bookmaker_margin([odds_1x2.get('Home',0), odds_1x2.get('Draw',0), odds_1x2.get('Away',0)])
+        if margin > MARGE_MAX_TIERS[tier]: return [] # Marge trop haute
+
+    # Analyse 1X2
+    edge_min = EDGE_MIN_TIERS[tier]
+    
+    mapping = {'Home': ('H', 'HOME WIN'), 'Draw': ('D', 'DRAW'), 'Away': ('A', 'AWAY WIN')}
+    
+    for market_name, (proba_key, label) in mapping.items():
+        odd = odds_1x2.get(market_name, 0)
+        if odd < COTE_MIN or odd > COTE_MAX: continue
         
-        for outcome, prob in model_probs.items():
-            odd_key = {'H': 'Home', 'D': 'Draw', 'A': 'Away'}.get(outcome)
-            odd = odds_vals.get(odd_key, 0)
+        implied = 1 / odd
+        edge = model_probs[proba_key] - implied
+        
+        if edge > edge_min:
+            opportunities.append({
+                "type": "1X2",
+                "label": label, # Sera remplacé par nom équipe plus tard
+                "odd": odd,
+                "edge": edge
+            })
             
-            if odd < COTE_MIN or odd > COTE_MAX: continue
-            
-            implied = 1 / odd
-            edge = prob - implied
-            
+    # Analyse Over 2.5
+    if 'Over 2.5' in odds_ou:
+        odd = odds_ou['Over 2.5']
+        if odd >= COTE_MIN:
+            implied = 1/odd
+            edge = model_probs['O25'] - implied
             if edge > edge_min:
-                icon = "🏠" if outcome == "H" else "⚖️" if outcome == "D" else "🏃"
-                values.append(f"{icon} {outcome} VALUE: {prob*100:.1f}% vs {odd} (Edge +{edge*100:.1f}%)")
+                opportunities.append({
+                    "type": "OU",
+                    "label": "Over 2.5",
+                    "odd": odd,
+                    "edge": edge
+                })
                 
-    except Exception as e:
-        pass
-    return "\n".join(values) if values else None
+    return opportunities
 
-# ====================== NOTIFICATION ======================
-def notify(msg, fid, league, dt, dcs, tier):
+# ====================== NOTIFICATION STYLE ======================
+def envoyer_notification(opps, fixture_info, dcs, tier):
     if not bot: return
+    fid = fixture_info['id']
     key = f"{fid}"
     if key in sent_alerts: return
     sent_alerts.add(key)
-    
-    full = f"""🚨 APEX-ENGINE ALERT [{tier}]
 
-🏆 {league}
-🕒 {dt} (UTC)
-📡 DCS: {dcs}/100
+    # Tri par Edge décroissant
+    opps.sort(key=lambda x: x['edge'], reverse=True)
+    main = opps[0]
+    alts = opps[1:]
 
-{msg}"""
+    # Formatage Nom Sélection
+    if main['type'] == "1X2":
+        if main['label'] == "HOME WIN": selection_name = fixture_info['home']
+        elif main['label'] == "AWAY WIN": selection_name = fixture_info['away']
+        else: selection_name = "Draw"
+    else:
+        selection_name = main['label']
+
+    # Construction du message
+    msg = f"""⚽ SOCCER ⚽
+
+Selection: {selection_name}
+
+Min. Odds: 🚀{main['odd']:.2f}🚀
+
+{fixture_info['home']} vs {fixture_info['away']}
+{fixture_info['country']} - {fixture_info['league']}
+{fixture_info['date']} (UTC)
+
+📡 APEX Signal: DCS {dcs}/100 | Edge +{main['edge']*100:.1f}%
+"""
+
+    # Ajout Alternatives
+    if alts:
+        msg += "\nAlternatives:\n"
+        for alt in alts:
+            # Format court pour alternatives
+            alt_name = alt['label']
+            if alt['type'] == "1X2":
+                 if alt['label'] == "HOME WIN": alt_name = fixture_info['home']
+                 elif alt['label'] == "AWAY WIN": alt_name = fixture_info['away']
+                 else: alt_name = "Draw"
+            
+            msg += f"▪ {alt_name} --> {alt['odd']:.2f}\n"
+
     try:
-        bot.send_message(CHAT_ID, full)
-        value_bets_history.append({"time": datetime.now().strftime("%H:%M"), "message": full})
-    except: pass
+        bot.send_message(CHAT_ID, msg)
+        value_bets_history.append({"time": datetime.now().strftime("%H:%M"), "message": msg})
+        print(f"✅ Telegram envoyé pour {fid}", flush=True)
+    except Exception as e:
+        print(f"❌ Erreur Telegram: {e}", flush=True)
 
 # ====================== CHECK ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v1.2 à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v1.3 à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
     
     fixtures = get_fixtures()
     if not fixtures: return
@@ -273,75 +263,65 @@ def check_value_bets():
     count = 0
     
     for f in fixtures:
-        # Filtre Temporel (Prochains 60 mins)
+        # Temporal Filter
         try:
             m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
-            if not (timedelta(minutes=0) < (m_date - now) < timedelta(minutes=60)):
-                continue
+            if not (timedelta(minutes=0) < (m_date - now) < timedelta(minutes=60)): continue
         except: continue
 
-        # Identification Ligue & Tier
+        # Tier Filter
         lname = f['league']['name']
         country = f['league']['country']
         tier = get_league_tier(lname, country)
+        if tier in ["BLACKLIST", "UNKNOWN"]: continue
         
-        if tier in ["BLACKLIST", "UNKNOWN"]:
-            continue
-            
-        # Limitation Quota (on analyse les P0/N1 en priorité)
+        # Limit
         if count >= 15: break
         count += 1
         
+        # Data Fetch
         fid = f['fixture']['id']
         lid = f['league']['id']
         season = f['league']['season']
         ht = f['teams']['home']
         at = f['teams']['away']
         
-        # Récupération données
         s_home = get_team_stats(ht['id'], lid, season)
         s_away = get_team_stats(at['id'], lid, season)
-        
         if not s_home or not s_away: continue
         
-        # Calcul DCS
         odds = get_odds(fid)
         dcs = calculate_dcs(s_home, s_away, odds)
         
-        if dcs < DCS_MIN_TIERS[tier]:
-            continue # Confiance insuffisante pour ce tier
-            
-        # Calcul Force & xG
+        if dcs < DCS_MIN_TIERS[tier]: continue
+        
+        # Math Engine
         try:
             h_avg = s_home['goals']['for']['total']['total'] / s_home['fixtures']['played']['total']
             h_conc = s_home['goals']['against']['total']['total'] / s_home['fixtures']['played']['total']
             a_avg = s_away['goals']['for']['total']['total'] / s_away['fixtures']['played']['total']
             a_conc = s_away['goals']['against']['total']['total'] / s_away['fixtures']['played']['total']
             
-            # Modèle simplifié pour stabilité
-            h_atk = h_avg / LEAGUE_AVG_GOALS
-            a_def = a_conc / LEAGUE_AVG_GOALS
-            hxg = h_atk * a_def * LEAGUE_AVG_GOALS * HOME_ADVANTAGE
+            hxg = (h_avg / LEAGUE_AVG_GOALS) * (a_conc / LEAGUE_AVG_GOALS) * LEAGUE_AVG_GOALS * HOME_ADVANTAGE
+            axg = (a_avg / LEAGUE_AVG_GOALS) * (h_conc / LEAGUE_AVG_GOALS) * LEAGUE_AVG_GOALS
             
-            a_atk = a_avg / LEAGUE_AVG_GOALS
-            h_def = h_conc / LEAGUE_AVG_GOALS
-            axg = a_atk * h_def * LEAGUE_AVG_GOALS
-            
-            # Simulation
             probs = run_monte_carlo(hxg, axg)
             
-            # Value Bet Check
-            val_msg = calculate_value_bet(probs, odds, tier)
-            if val_msg:
-                dt_str = f['fixture']['date'][:16].replace('T', ' ')
-                msg = f"{ht['name']} vs {at['name']}\n\n{val_msg}"
-                notify(msg, fid, lname, dt_str, dcs, tier)
+            # Recherche Value
+            opportunities = analyze_markets(probs, odds, tier)
             
-        except:
-            continue
+            if opportunities:
+                info = {
+                    'id': fid, 'league': lname, 'country': country,
+                    'home': ht['name'], 'away': at['name'],
+                    'date': f['fixture']['date'][:16].replace('T', ' ')
+                }
+                envoyer_notification(opportunities, info, dcs, tier)
             
+        except: continue
         time.sleep(0.5)
-    print(f"✅ Check terminé: {count} matchs analysés.", flush=True)
+        
+    print(f"✅ Check terminé: {count} analysés.", flush=True)
 
 # ====================== SCHEDULER ======================
 def run_scheduler():
