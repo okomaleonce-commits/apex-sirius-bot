@@ -12,14 +12,14 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.4 - THE FIX", 200
+    return "🤖 APEX-ENGINE v2.5 - REALITY CHECK", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.4 - STRATEGIC FIX", flush=True)
+print("🚀 APEX-ENGINE v2.5 - CALIBRATED MODEL", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -46,39 +46,127 @@ tracked_bets = []
 fs_teams_cache = {}
 
 # ====================== CONSTANTS ======================
-RHO = 0.10 # Dixon-Coles Rho standard
+RHO = 0.10
 
-# Mapping étendu pour éviter le "UNKNOWN"
 TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
-TIER_N1 = ["premier league", "championship", "la liga", "laliga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league", "scottish premiership"]
-TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl", " primera division", "primeira liga"]
-TIER_N3 = ["major league soccer", "liga mx", "liga profesional argentina", "brasileirão", "j1 league", "k league 1", "saudi pro league", "chinese super league"]
+TIER_N1 = ["premier league", "championship", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league"]
+TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl"]
+TIER_N3 = ["major league soccer", "liga mx", "liga profesional argentina", "brasileirão", "j1 league", "k league 1", "saudi pro league"]
 
 BLACKLIST_KEYWORDS = ["u17", "u18", "u19", "u20", "u21", "u23", "ii", " b ", "reserves", "youth", "women", "womens", "femenil", "amateur"]
 
-# ====================== HELPERS ======================
-def get_league_tier(league_name, country):
-    lname = league_name.lower().strip()
+# ====================== MATH ENGINE (CALIBRATED) ======================
+def poisson_prob(lmbda, k):
+    try:
+        return (math.exp(-lmbda) * (lmbda ** k)) / math.factorial(k)
+    except: return 0.0
+
+def calculate_match_probabilities(hxg, axg):
+    probs = {"H": 0.0, "D": 0.0, "A": 0.0}
+    if hxg <= 0.1 or axg <= 0.1: return probs
+
+    hp = [poisson_prob(hxg, i) for i in range(7)]
+    ap = [poisson_prob(axg, i) for i in range(7)]
+
+    for h in range(7):
+        for a in range(7):
+            p = hp[h] * ap[a]
+            
+            # Dixon-Coles minimal
+            if h == 0 and a == 0: p *= (1 - RHO)
+            elif h == 1 and a == 0: p *= (1 + RHO)
+            elif h == 0 and a == 1: p *= (1 + RHO)
+            elif h == 1 and a == 1: p *= (1 - RHO)
+            
+            if h > a: probs["H"] += p
+            elif h == a: probs["D"] += p
+            else: probs["A"] += p
+            
+    return probs
+
+def calibrate_probability(p):
+    """
+    PRIORITÉ 1: Calibration.
+    Ajustement vers le bas pour contrer l'over-estimation des outsiders.
+    """
+    return 0.85 * p
+
+# ====================== VALUE DETECTOR (FIXED) ======================
+def detect_value(probs, odds_data, hxg, axg):
+    opps = []
+    if not odds_data: return []
+
+    best = {"Home": (0, "N/A"), "Draw": (0, "N/A"), "Away": (0, "N/A")}
+    for bm_data in odds_data:
+        for bm in bm_data.get('bookmakers', []):
+            bn = bm['name']
+            for bet in bm['bets']:
+                if bet['name'] == "Match Winner":
+                    for v in bet['values']:
+                        odd = float(v['odd'])
+                        side = v['value']
+                        if odd > best[side][0]:
+                            best[side] = (odd, bn)
+
+    markets = [
+        {"key": "H", "side": "Home"},
+        {"key": "D", "side": "Draw"},
+        {"key": "A", "side": "Away"}
+    ]
+
+    for m in markets:
+        raw_prob = probs[m['key']]
+        
+        # 1. Calibration
+        prob = calibrate_probability(raw_prob)
+        
+        odd, bookie = best[m['side']]
+        
+        if odd < 1.50: continue # Cotes trop basses ignorées
+        
+        # PRIORITÉ 3: Calcul ROI (Espérance de gain)
+        # ROI = (Prob * Cote) - 1
+        roi = (prob * odd) - 1.0
+        
+        # PRIORITÉ 2: Cap sur outsiders
+        # Si la cote est énorme (>6), il faut une probabilité solide (>20%)
+        if odd > 6.00:
+            if prob < 0.20:
+                continue # Bloque les hallucinations type @13.00, @37.00
+
+        # PRIORITÉ 4: Filtre dur sur ROI
+        # On veut au moins 5% de ROI attendu
+        if roi < 0.05: continue
+
+        opps.append({
+            "type": "1X2", "label": m['side'].upper(), "odd": odd,
+            "roi": roi, "prob": prob, "proba_key": m['key'], "bookie": bookie
+        })
+
+    # PRIORITÉ 5: Limite par match
+    if opps:
+        # On garde le bet avec le meilleur ROI
+        opps.sort(key=lambda x: x['roi'], reverse=True)
+        return [opps[0]]
     
-    # Nettoyage basique
-    lname = lname.replace(" - ", " ")
-    
+    return []
+
+# ====================== HELPERS & API ======================
+# (Identique v2.4 pour la concision)
+def get_league_tier(lname, country):
+    lname = lname.lower()
     for kw in BLACKLIST_KEYWORDS:
         if kw in lname: return "BLACKLIST"
-    
     if any(x in lname for x in TIER_P0): return "P0"
     if any(x in lname for x in TIER_N1): return "N1"
     if any(x in lname for x in TIER_N2): return "N2"
     if any(x in lname for x in TIER_N3): return "N3"
-    
-    # PRIORITE 5: Bloquer les ligues mortes
     return "UNKNOWN"
 
-# ====================== API HANDLERS ======================
 def safe_api_call(url):
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        if resp.status_code == 200: return resp.json()
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code == 200: return r.json()
     except: pass
     return None
 
@@ -90,108 +178,6 @@ def get_team_stats(tid, lid, season):
 
 def get_odds(fid):
     return safe_api_call(f"{BASE_URL}/odds?fixture={fid}").get('response', [])
-
-# ====================== MATH ENGINE (PROPRE) ======================
-def poisson_prob(lmbda, k):
-    try:
-        return (math.exp(-lmbda) * (lmbda ** k)) / math.factorial(k)
-    except: return 0.0
-
-def calculate_match_probabilities(hxg, axg):
-    """
-    Poisson + Dixon-Coles correct.
-    Retourne dict: H, D, A, O25, BTTS
-    """
-    probs = {"H": 0.0, "D": 0.0, "A": 0.0, "O25": 0.0, "BTTS": 0.0}
-    if hxg <= 0.1 or axg <= 0.1: return probs # Sécurité
-
-    # Matrices Poisson (0 à 6 buts)
-    hp = [poisson_prob(hxg, i) for i in range(7)]
-    ap = [poisson_prob(axg, i) for i in range(7)]
-
-    for h in range(7):
-        for a in range(7):
-            p = hp[h] * ap[a]
-            
-            # Correction Dixon-Coles (Rho = 0.10)
-            # Appliquée seulement sur les scores bas : 0-0, 1-0, 0-1, 1-1
-            if h == 0 and a == 0: p *= (1 - RHO)
-            elif h == 1 and a == 0: p *= (1 + RHO)
-            elif h == 0 and a == 1: p *= (1 + RHO)
-            elif h == 1 and a == 1: p *= (1 - RHO)
-            
-            # Agrégation
-            if h > a: probs["H"] += p
-            elif h == a: probs["D"] += p
-            else: probs["A"] += p
-            
-            if h + a > 2.5: probs["O25"] += p
-            if h >= 1 and a >= 1: probs["BTTS"] += p
-            
-    return probs
-
-# ====================== VALUE DETECTOR (PRIORITÉ 1 & 3) ======================
-def detect_value(probs, odds_data, tier, hxg, axg):
-    opps = []
-    if not odds_data: return []
-
-    # 1. Trouver les meilleures cotes
-    best = {"Home": (0, "N/A"), "Draw": (0, "N/A"), "Away": (0, "N/A")}
-    for bm_data in odds_data:
-        for bm in bm_data.get('bookmakers', []):
-            bn = bm['name']
-            for bet in bm['bets']:
-                if bet['name'] == "Match Winner":
-                    for v in bet['values']:
-                        odd = float(v['odd'])
-                        side = v['value'] # Home, Draw, Away
-                        if odd > best[side][0]:
-                            best[side] = (odd, bn)
-
-    # 2. Analyser les marchés
-    markets = [
-        {"key": "H", "side": "Home"},
-        {"key": "D", "side": "Draw"},
-        {"key": "A", "side": "Away"}
-    ]
-
-    for m in markets:
-        prob = probs[m['key']]
-        odd, bookie = best[m['side']]
-        
-        if odd < 1.50: continue # Pas de petites cotes
-        
-        implied = 1.0 / odd
-        
-        # PRIORITÉ 3: Nouvelle formule d'Edge
-        # Edge = (Prob / Implied) - 1
-        # Si Prob=0.30, Implied=0.25 (Cote 4.00) -> Edge = (0.3/0.25)-1 = 0.20 (20% ROI relatif)
-        edge = (prob / implied) - 1.0 if implied > 0 else 0
-        
-        # ========================
-        # PRIORITÉ 1: Stopper l'hémorragie sur les DRAWS
-        # ========================
-        if m['key'] == "D":
-            # Filtre A: Proba modèle minimum
-            if prob < 0.32: continue 
-            # Filtre B: Cote minimum (implied < 31%)
-            if odd < 3.20: continue
-            
-            # PRIORITÉ 2: Filtre équilibre xG
-            # Si les équipes ne sont pas proches, le nul est suspect
-            if abs(hxg - axg) >= 0.25: continue
-
-        # Seuil d'Edge minimum selon le marché
-        # On demande un ROI potentiel de 10% (Edge > 0.10)
-        if edge < 0.10: continue
-
-        opps.append({
-            "type": "1X2", "label": m['side'].upper(), "odd": odd,
-            "edge": edge, "proba_key": m['key'], "bookie": bookie
-        })
-
-    # PRIORITÉ 4: Hard filter volume
-    return opps[:3] # Max 3 bets par match
 
 # ====================== NOTIFICATION ======================
 def notify(opp, info, hxg, axg):
@@ -207,17 +193,17 @@ def notify(opp, info, hxg, axg):
     msg = f"⚽ {info['home']} vs {info['away']}\n"
     msg += f"🌍 {info['league']}\n\n"
     msg += f"📊 xG: {hxg:.2f} - {axg:.2f}\n"
-    msg += f"🚨 VALUE BET\nSelection: {sel}\nOdds: 🚀{opp['odd']:.2f}🚀\nROI Estimé: +{opp['edge']*100:.1f}%"
+    msg += f"🚨 BET VALIDÉ\nSelection: {sel}\nCote: {opp['odd']:.2f}\nROI Estimé: +{opp['roi']*100:.1f}%"
 
     try:
         bot.send_message(CHAT_ID, msg)
-        print(f"✅ SENT: {sel} @ {opp['odd']:.2f} (ROI +{opp['edge']*100:.0f}%)", flush=True)
+        print(f"✅ SENT: {sel} @ {opp['odd']:.2f} (ROI +{opp['roi']*100:.0f}%)", flush=True)
     except: pass
 
 # ====================== MAIN CHECK ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v2.4", flush=True)
+    print(f"\n⏰ Check v2.5", flush=True)
 
     fixtures = get_fixtures()
     if not fixtures: return
@@ -230,10 +216,7 @@ def check_value_bets():
             if not (timedelta(minutes=0) < (m_date - now) < timedelta(hours=6)): continue
         except: continue
 
-        lname = f['league']['name']
-        tier = get_league_tier(lname, f['league']['country'])
-        
-        # PRIORITÉ 5: Bloquer ligues mortes
+        tier = get_league_tier(f['league']['name'], f['league']['country'])
         if tier == "BLACKLIST" or tier == "UNKNOWN": continue
         
         fid = f['fixture']['id']
@@ -242,11 +225,10 @@ def check_value_bets():
         s_away = get_team_stats(f['teams']['away']['id'], f['league']['id'], f['league']['season'])
         if not s_home or not s_away: continue
         
-        # Calcul xG (Fallback API simple, pas de FS mapping pour l'instant)
+        # xG Calculation (Simple & Safe)
         try:
             h_avg = s_home['goals']['for']['total']['total'] / s_home['fixtures']['played']['total']
             a_avg = s_away['goals']['for']['total']['total'] / s_away['fixtures']['played']['total']
-            # Modèle simple : Attaque * Défense adverse * Avantage Domicile
             hxg = h_avg * 1.15
             axg = a_avg
         except:
@@ -255,14 +237,13 @@ def check_value_bets():
         odds = get_odds(fid)
         probs = calculate_match_probabilities(hxg, axg)
         
-        opps = detect_value(probs, odds, tier, hxg, axg)
+        opps = detect_value(probs, odds, hxg, axg)
         
         if opps:
             info = {
-                'id': fid, 'league': lname, 
+                'id': fid, 'league': f['league']['name'], 
                 'home': f['teams']['home']['name'], 'away': f['teams']['away']['name']
             }
-            # On envoie que le meilleur bet
             notify(opps[0], info, hxg, axg)
         
         time.sleep(0.5)
