@@ -12,19 +12,18 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.6 - PROFESSIONAL REALITY", 200
+    return "🤖 APEX-ENGINE v2.7 - SWEET SPOT", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.6 - PRO REALITY", flush=True)
+print("🚀 APEX-ENGINE v2.7 - SWEET SPOT", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
-
 FOOTYSTATS_KEY = "b637867a6fca38fd2f388553abf0768840d84ded4b335ce23d97e708b7a502c6"
 
 bot = None
@@ -41,22 +40,22 @@ BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
 sent_alerts = set()
-tracked_bets = []
 
 # ====================== CONSTANTS ======================
+MAX_BETS_PER_SESSION = 5
 RHO = 0.10
-MAX_BETS_PER_SESSION = 5 # Limite stricte
 
+# Ligues Reconnues (Tiers)
 TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
-TIER_N1 = ["premier league", "championship", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league"]
-TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl"]
+TIER_N1 = ["premier league", "championship", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league", "scottish premiership"]
+TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl", "damallsvenskan", "nwsl"] # Ajout ligues scandi
 TIER_N3 = ["major league soccer", "liga mx", "liga profesional argentina", "brasileirão", "j1 league", "k league 1", "saudi pro league"]
 
-# Blacklist renforcée (Femmes + Jeunes + Réserves)
+# Blacklist Dur (Femmes, Jeunes, Réserves)
 BLACKLIST_KEYWORDS = [
     "u17", "u18", "u19", "u20", "u21", "u23", 
     "ii", " b ", "reserves", "youth", "women", "womens", "femenil", "amateur",
-    " w", "(w)", "damallsvenskan", "nwsl" # Ajout femmes explicite
+    " w", "(w)", " damallsvenskan" # Ciblage nom équipe
 ]
 
 # ====================== MATH ENGINE ======================
@@ -68,36 +67,28 @@ def poisson_prob(lmbda, k):
 def calculate_match_probabilities(hxg, axg):
     probs = {"H": 0.0, "D": 0.0, "A": 0.0}
     if hxg <= 0.1 or axg <= 0.1: return probs
-
     hp = [poisson_prob(hxg, i) for i in range(7)]
     ap = [poisson_prob(axg, i) for i in range(7)]
-
     for h in range(7):
         for a in range(7):
             p = hp[h] * ap[a]
-            
-            # Dixon-Coles
             if h == 0 and a == 0: p *= (1 - RHO)
             elif h == 1 and a == 0: p *= (1 + RHO)
             elif h == 0 and a == 1: p *= (1 + RHO)
             elif h == 1 and a == 1: p *= (1 - RHO)
-            
             if h > a: probs["H"] += p
             elif h == a: probs["D"] += p
             else: probs["A"] += p
-            
     return probs
 
 def calibrate_probability(p):
-    # Shrinkage conservateur
     return 0.85 * p
 
-# ====================== VALUE DETECTOR (PRIORITIES APPLIED) ======================
+# ====================== VALUE DETECTOR ======================
 def detect_value(probs, odds_data, hxg, axg):
     opps = []
     if not odds_data: return []
-
-    # Recherche meilleure cote
+    
     best = {"Home": (0, "N/A"), "Draw": (0, "N/A"), "Away": (0, "N/A")}
     for bm_data in odds_data:
         for bm in bm_data.get('bookmakers', []):
@@ -119,26 +110,21 @@ def detect_value(probs, odds_data, hxg, axg):
     for m in markets:
         raw_prob = probs[m['key']]
         prob = calibrate_probability(raw_prob)
-        
         odd, bookie = best[m['side']]
         
         if odd < 1.50: continue
         
-        # PRIORITÉ 1: Coupe les outsiders (Max cote 4.5)
-        if odd > 4.5: continue
+        # FIX 1: Cote Max relevée à 5.50
+        if odd > 5.50: continue
         
-        # PRIORITÉ 4: Bloque les probabilités faibles (< 30%)
-        if prob < 0.30: continue
+        # FIX 2: Proba Min relevée à 25%
+        if prob < 0.25: continue
         
-        # PRIORITÉ 2: Filtre Gap xG (Matchs trop serrés = bruit)
-        # Si l'écart est < 0.4, le modèle est trop incertain
-        if abs(hxg - axg) < 0.4:
+        # FIX 3: Gap xG relaxé (bloque seulement si ultra serré < 0.2)
+        if abs(hxg - axg) < 0.2:
             continue
 
-        # Calcul ROI
         roi = (prob * odd) - 1.0
-        
-        # Filtre ROI Dur
         if roi < 0.05: continue
 
         opps.append({
@@ -146,21 +132,16 @@ def detect_value(probs, odds_data, hxg, axg):
             "roi": roi, "prob": prob, "proba_key": m['key'], "bookie": bookie
         })
 
-    # PRIORITÉ 5: Un seul bet par match (le meilleur ROI)
     if opps:
         opps.sort(key=lambda x: x['roi'], reverse=True)
         return [opps[0]]
-    
     return []
 
 # ====================== HELPERS ======================
 def get_league_tier(lname, country):
     lname = lname.lower()
-    # Vérifie Blacklist dans Nom Ligue
     for kw in BLACKLIST_KEYWORDS:
         if kw in lname: return "BLACKLIST"
-    
-    # Check Tiers
     if any(x in lname for x in TIER_P0): return "P0"
     if any(x in lname for x in TIER_N1): return "N1"
     if any(x in lname for x in TIER_N2): return "N2"
@@ -168,7 +149,6 @@ def get_league_tier(lname, country):
     return "UNKNOWN"
 
 def check_blacklist_teams(home, away):
-    """Vérifie les noms d'équipes pour les mots interdits (W, Reserves...)"""
     h = home.lower()
     a = away.lower()
     for kw in BLACKLIST_KEYWORDS:
@@ -215,11 +195,10 @@ def notify(opp, info, hxg, axg):
 # ====================== MAIN CHECK ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v2.6", flush=True)
+    print(f"\n⏰ Check v2.7", flush=True)
 
-    # Limite dure
     if len(sent_alerts) >= MAX_BETS_PER_SESSION:
-        print(f"🛑 LIMITE QUOTA ATTEINT ({MAX_BETS_PER_SESSION} bets)", flush=True)
+        print(f"🛑 QUOTA ATTEINT", flush=True)
         return
 
     fixtures = get_fixtures()
@@ -228,19 +207,15 @@ def check_value_bets():
     now = datetime.now(timezone.utc)
     processed = 0
     
-    # Optimisation: On ne scanne que les 100 prochains matchs pour éviter le Timeout
-    # Render timeout est 120s. 100 matchs ~ 60 secondes.
     for f in fixtures[:100]: 
         try:
             m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
-            # Fenêtre 6h
             if not (timedelta(minutes=0) < (m_date - now) < timedelta(hours=6)): continue
         except: continue
 
         tier = get_league_tier(f['league']['name'], f['league']['country'])
         if tier == "BLACKLIST" or tier == "UNKNOWN": continue
         
-        # Filtre équipe (Femmes/Reserves)
         h_name = f['teams']['home']['name']
         a_name = f['teams']['away']['name']
         if check_blacklist_teams(h_name, a_name): continue
@@ -251,12 +226,10 @@ def check_value_bets():
         s_away = get_team_stats(f['teams']['away']['id'], f['league']['id'], f['league']['season'])
         if not s_home or not s_away: continue
         
-        # Calcul xG
         try:
             h_avg = s_home['goals']['for']['total']['total'] / s_home['fixtures']['played']['total']
             a_avg = s_away['goals']['for']['total']['total'] / s_away['fixtures']['played']['total']
             
-            # PRIORITÉ 3: Asymétrie Domicile
             home_advantage = 0.15
             hxg = h_avg + home_advantage
             axg = a_avg
@@ -274,15 +247,12 @@ def check_value_bets():
                 'home': h_name, 'away': a_name
             }
             notify(opps[0], info, hxg, axg)
-            
-            # Stop si quota atteint
-            if len(sent_alerts) >= MAX_BETS_PER_SESSION:
-                break
+            if len(sent_alerts) >= MAX_BETS_PER_SESSION: break
         
         processed += 1
-        time.sleep(0.3) # Rythme calme pour le CPU
+        time.sleep(0.3)
 
-    print(f"✅ Check done: {processed} analyzed.", flush=True)
+    print(f"✅ Check done: {processed} analyzed. Total bets: {len(sent_alerts)}", flush=True)
 
 # ====================== LOOP ======================
 def run_loop():
