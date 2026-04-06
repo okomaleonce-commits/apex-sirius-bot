@@ -5,24 +5,23 @@ import schedule
 import os
 import threading
 import math
-import csv
 from flask import Flask
 from datetime import datetime, timezone, timedelta
-
-print("🚀 APEX-SIRIUS v4.3 - TIME FIX & DEBUG", flush=True)
 
 # ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS v4.3 Running", 200
+    return "🤖 APEX-SIRIUS v4.5 X-RAY", 200
 
 @app.route('/ping')
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
+print("🚀 APEX-SIRIUS v4.5 - X-RAY MODE", flush=True)
+
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
@@ -40,16 +39,6 @@ else:
 
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
-
-# ====================== TRACKING ======================
-TRACKING_FILE = "/tmp/apex_tracking.csv"
-
-def log_bet(match, market, side, odd, prob, edge, stake):
-    try:
-        with open(TRACKING_FILE, "a", newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([datetime.now().isoformat(), match, market, side, odd, prob, edge, stake])
-    except: pass
 
 # ====================== MATH ======================
 def poisson_prob(lmbda, k):
@@ -86,12 +75,8 @@ def derive_markets(hxg, axg):
 def compute_edge(prob, odd):
     return prob - (1 / odd)
 
-def kelly_fraction(prob, odd, fraction=0.5):
-    if odd <= 1: return 0
-    return max((prob * odd - 1) / (odd - 1), 0) * fraction
-
 def detect_value(markets, odds_data):
-    opportunities = []
+    opps = []
     for side_key, side_name in [("H", "Home"), ("D", "Draw"), ("A", "Away")]:
         prob = markets["1X2"][side_key]
         for bm_data in odds_data:
@@ -102,32 +87,9 @@ def detect_value(markets, odds_data):
                             if v['value'] == side_name:
                                 odd = float(v['odd'])
                                 edge = compute_edge(prob, odd)
-                                # Debug visible
-                                # print(f"   [CHECK] {side_name} @ {odd:.2f} | Edge {edge*100:.1f}%", flush=True)
                                 if edge > 0.02:
-                                    opportunities.append({
-                                        "market": "1X2", "side": side_name, "prob": prob,
-                                        "odd": odd, "edge": edge, "stake": kelly_fraction(prob, odd)
-                                    })
-
-    # Over 2.5
-    prob = markets["O2.5"]
-    for bm_data in odds_data:
-        for bm in bm_data.get('bookmakers', []):
-            for bet in bm.get('bets', []):
-                if bet['name'] == "Goals Over/Under":
-                    for v in bet.get('values', []):
-                        if "Over 2.5" in v['value']:
-                            odd = float(v['odd'])
-                            edge = compute_edge(prob, odd)
-                            if edge > 0.02:
-                                opportunities.append({
-                                    "market": "O2.5", "side": "Over", "prob": prob,
-                                    "odd": odd, "edge": edge, "stake": kelly_fraction(prob, odd)
-                                })
-
-    opportunities.sort(key=lambda x: x['edge'], reverse=True)
-    return opportunities[:3]
+                                    opps.append({"market": "1X2", "side": side_name, "prob": prob, "odd": odd, "edge": edge})
+    return opps[:3]
 
 # ====================== FEATURES ======================
 def safe_api_call(url):
@@ -146,25 +108,17 @@ def build_features(fixture):
         season = fixture['league']['season']
         ht_id = fixture['teams']['home']['id']
         at_id = fixture['teams']['away']['id']
-
         s_home = get_team_stats(ht_id, lid, season)
         s_away = get_team_stats(at_id, lid, season)
-
         if not s_home or not s_away: return 1.35, 1.20
-
-        # Stats Domicile pour Home
         h_goals_home = s_home['goals']['for']['total']['home']
         h_matches_home = s_home['fixtures']['played']['home']
         hxg = h_goals_home / h_matches_home if h_matches_home > 0 else 1.2
-
-        # Stats Extérieur pour Away
         a_goals_away = s_away['goals']['for']['total']['away']
         a_matches_away = s_away['fixtures']['played']['away']
         axg = a_goals_away / a_matches_away if a_matches_away > 0 else 1.0
-
         return hxg * 1.10, axg
-    except:
-        return 1.35, 1.20
+    except: return 1.35, 1.20
 
 # ====================== API ======================
 def get_fixtures():
@@ -178,72 +132,68 @@ def get_odds(fid):
 
 # ====================== CHECK ======================
 def check_value_bets():
-    print(f"\n⏰ Check v4.3 à {datetime.now().strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v4.5 X-RAY à {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     fixtures = get_fixtures()
     print(f"📊 {len(fixtures)} matchs chargés", flush=True)
 
     now = datetime.now(timezone.utc)
     count_analyzed = 0
-    count_value = 0
 
-    for f in fixtures[:60]:
-        # === FIX TIMEZONE (CRITICAL) ===
+    # === X-RAY DEBUG LOOP ===
+    for i, f in enumerate(fixtures[:60]):
         try:
+            # 1. Debug données brutes
             raw_date = f['fixture']['date']
-            m_date = datetime.fromisoformat(raw_date.replace('Z', '+00:00'))
+            status = f['fixture']['status']['short']
+            home = f['teams']['home']['name']
+            away = f['teams']['away']['name']
             
-            # Si la date est "naive" (sans tz), on force UTC
+            if i < 5:
+                print(f"   [X-RAY #{i+1}] {home} vs {away}", flush=True)
+                print(f"      Raw Date: {raw_date}", flush=True)
+
+            # 2. Parsing Date
+            m_date = datetime.fromisoformat(raw_date.replace('Z', '+00:00'))
             if m_date.tzinfo is None:
                 m_date = m_date.replace(tzinfo=timezone.utc)
+
+            delta = (m_date - now).total_seconds() / 3600
             
-            # Filtre Temps : Matchs passés de moins de 2h OU futurs dans moins de 6h
-            # On elargit pour capter les matchs en cours/terminés récemment pour debug
-            if not (now - timedelta(hours=2) <= m_date <= now + timedelta(hours=6)):
+            if i < 5:
+                print(f"      Parsed: {m_date.isoformat()} | Delta: {delta:.1f}h | Status: {status}", flush=True)
+
+            # 3. Filtre Temps
+            # ON GARDE LARGE : -2h a +24h
+            if not (now - timedelta(hours=2) <= m_date <= now + timedelta(hours=24)):
+                if i < 5: print(f"      ❌ REJETE (Hors temps)", flush=True)
                 continue
+
+            if i < 5: print(f"      ✅ ACCEPTE", flush=True)
             
+            count_analyzed += 1
+            
+            # Analyse Réelle
+            hxg, axg = build_features(f)
+            markets = derive_markets(hxg, axg)
+            odds_data = get_odds(f['fixture']['id'])
+            opportunities = detect_value(markets, odds_data)
+
+            for opp in opportunities:
+                msg = f"""🚨 APEX v4.5 BET
+{home} vs {away}
+{opp['market']} - {opp['side']}
+💰 {opp['odd']:.2f} | Edge: +{opp['edge']*100:.1f}%"""
+                try:
+                    bot.send_message(CHAT_ID, msg)
+                    print(f"✅ Sent : {opp['side']} @ {opp['odd']:.2f}", flush=True)
+                except: pass
+
         except Exception as e:
-            print(f"⚠️ Erreur Date: {e}", flush=True)
+            print(f"⚠️ ERREUR CRITIQUE LOOP: {e}", flush=True)
             continue
 
-        count_analyzed += 1
-        
-        home = f['teams']['home']['name']
-        away = f['teams']['away']['name']
-        league_name = f['league']['name']
-        country = f['league'].get('country', 'N/A')
-        date_time = f['fixture']['date'][:16].replace('T', ' ')
-
-        print(f"🔎 Analyse: {home} vs {away} ({league_name})", flush=True)
-
-        hxg, axg = build_features(f)
-        markets = derive_markets(hxg, axg)
-        odds_data = get_odds(f['fixture']['id'])
-
-        opportunities = detect_value(markets, odds_data)
-
-        for opp in opportunities:
-            count_value += 1
-            stake = opp['stake'] * 100
-            msg = f"""🚨 APEX v4.3 VALUE BET
-
-🌍 {country} | 🏆 {league_name}
-🕒 {date_time}
-
-{home} vs {away}
-🎯 {opp['market']} - {opp['side']}
-💰 Cote : {opp['odd']:.2f}
-📈 Proba : {opp['prob']:.1%}
-⚡ Edge : +{opp['edge']*100:.1f}%
-💵 Stake : {stake:.1f}%"""
-
-            try:
-                bot.send_message(CHAT_ID, msg)
-                print(f"✅ Sent : {opp['side']} @ {opp['odd']:.2f}", flush=True)
-                log_bet(f"{home} vs {away}", opp['market'], opp['side'], opp['odd'], opp['prob'], opp['edge'], stake)
-            except: pass
-
-    print(f"✅ Terminé: {count_analyzed} analysés | {count_value} alerts\n", flush=True)
+    print(f"✅ Terminé: {count_analyzed} analysés.\n", flush=True)
 
 # ====================== SCHEDULER ======================
 def run_scheduler():
