@@ -9,14 +9,14 @@ import csv
 from flask import Flask
 from datetime import datetime, timezone, timedelta
 
-print("🚀 APEX-SIRIUS v4.1 DEBUG - Edge 0.02 + prints détaillés", flush=True)
+print("🚀 APEX-SIRIUS v4.2 DEBUG - Edge 0.01 + logs très détaillés", flush=True)
 
 # ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS v4.1 DEBUG Running", 200
+    return "🤖 APEX-SIRIUS v4.2 DEBUG Running", 200
 
 @app.route('/ping')
 def ping():
@@ -98,7 +98,7 @@ def kelly_fraction(prob, odd, fraction=0.5):
 
 def detect_value(markets, odds_data):
     opportunities = []
-    print("   [DEBUG] Début detect_value", flush=True)
+    print("   [DEBUG] Début detect_value - recherche de value bets", flush=True)
 
     # 1X2
     for side_key, side_name in [("H", "Home"), ("D", "Draw"), ("A", "Away")]:
@@ -111,8 +111,8 @@ def detect_value(markets, odds_data):
                             if v['value'] == side_name:
                                 odd = float(v['odd'])
                                 edge = compute_edge(prob, odd)
-                                print(f"   [DEBUG] {side_name} | Prob={prob*100:.1f}% | Odd={odd} | Edge={edge*100:.2f}%", flush=True)
-                                if edge > 0.02:   # ← EDGE BAISSÉ À 0.02 pour debug
+                                print(f"   [DEBUG] {side_name} | Prob={prob*100:.1f}% | Odd={odd:.2f} | Edge={edge*100:.2f}%", flush=True)
+                                if edge > 0.01:   # ← EDGE TRÈS BAS POUR DEBUG
                                     opportunities.append({
                                         "market": "1X2",
                                         "side": side_name,
@@ -134,8 +134,8 @@ def detect_value(markets, odds_data):
                                (mkt == "BTTS" and v['value'] == 'Yes'):
                                 odd = float(v['odd'])
                                 edge = compute_edge(prob, odd)
-                                print(f"   [DEBUG] {mkt} | Prob={prob*100:.1f}% | Odd={odd} | Edge={edge*100:.2f}%", flush=True)
-                                if edge > 0.02:
+                                print(f"   [DEBUG] {mkt} | Prob={prob*100:.1f}% | Odd={odd:.2f} | Edge={edge*100:.2f}%", flush=True)
+                                if edge > 0.01:
                                     opportunities.append({
                                         "market": mkt,
                                         "side": "Yes",
@@ -178,7 +178,7 @@ def get_odds(fid):
 
 # ====================== CHECK ======================
 def check_value_bets():
-    print(f"\n⏰ Check v4.1 DEBUG à {datetime.now().strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v4.2 DEBUG à {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     fixtures = get_fixtures()
     print(f"📊 {len(fixtures)} matchs chargés", flush=True)
@@ -214,7 +214,7 @@ def check_value_bets():
         for opp in opportunities:
             count_value += 1
             stake = opp['stake'] * 100
-            msg = f"""🚨 APEX v4.1 DEBUG VALUE BET
+            msg = f"""🚨 APEX v4.2 DEBUG VALUE BET
 
 🌍 {country} | 🏆 {league_name}
 🕒 {date_time}
