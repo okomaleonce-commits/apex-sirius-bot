@@ -5,6 +5,7 @@ import schedule
 import os
 import threading
 import math
+import csv
 from flask import Flask
 from datetime import datetime, timezone, timedelta
 
@@ -142,17 +143,35 @@ def detect_value(markets, odds_data):
                                     })
 
     opportunities.sort(key=lambda x: x['edge'], reverse=True)
-    return opportunities[:3]  # max 3 bets par match
+    return opportunities[:3]
 
 # ====================== FEATURE ENGINE ======================
 def build_features(fixture):
     try:
-        # Proxy xG simple mais raisonnable (à améliorer plus tard)
         hxg = 1.45
         axg = 1.25
         return hxg, axg
     except:
         return 1.3, 1.3
+
+# ====================== API HELPERS ======================
+def safe_api_call(url):
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code == 200:
+            return r.json()
+    except:
+        pass
+    return None
+
+def get_fixtures():
+    today = time.strftime("%Y-%m-%d")
+    data = safe_api_call(f"{BASE_URL}/fixtures?date={today}")
+    return data.get('response', []) if data else []
+
+def get_odds(fid):
+    data = safe_api_call(f"{BASE_URL}/odds?fixture={fid}")
+    return data.get('response', []) if data else []
 
 # ====================== CHECK ======================
 def check_value_bets():
@@ -190,7 +209,7 @@ def check_value_bets():
 
         for opp in opportunities:
             count_value += 1
-            stake = opp['stake'] * 100   # en pourcentage de bankroll
+            stake = opp['stake'] * 100
             msg = f"""🚨 APEX v4.0 VALUE BET
 
 🌍 {country} | 🏆 {league_name}
