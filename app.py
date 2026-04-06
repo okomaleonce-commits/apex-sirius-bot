@@ -14,14 +14,14 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.1e - SAFE START", 200
+    return "🤖 APEX-ENGINE v2.1f - STABLE COPY", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.1e - STARTING...", flush=True)
+print("🚀 APEX-ENGINE v2.1f - START", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -59,7 +59,7 @@ TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conferenc
 TIER_N1 = ["premier league", "championship", "league one", "league two", "la liga", "la liga 2", "laliga smartbank", "bundesliga", "2. bundesliga", "3. liga", "ligue 1", "ligue 2", "serie a", "serie b", "liga portugal", "primeira liga", "liga portugal 2", "eredivisie", "eerste divisie", "jupiler pro league", "challenger pro league", "premiership", "scottish championship", "scottish league one"]
 TIER_N2 = ["süper lig", "super lig", "tff 1. lig", "russian premier league", "fnl", "ukrainian premier league", "persha liha", "super league 1", "super league 2", "super league greece", "bundesliga autrichienne", "2. liga autrichienne", "super league suisse", "challenge league suisse", "superliga", "1. division", "denmark superliga", "allsvenskan", "superettan", "eliteserien", "1. divisjon", "veikkausliiga", "ekstraklasa", "i liga", "czech first league", "czech national football league", "fortuna liga", "otp bank liga", "nemzeti bajnokság ii", "liga 1", "liga 2", "liga 1 romania", "superliga srbija", "prva liga", "hnl", "1. nl", "prva liga telekom", "prva liga slovenije", "premier league de bosnie", "first professional league", "second professional league", "kategoria superiore", "prva makedonska", "meridianbet", "1. cfl", "1re division chypriote", "cyprus division", "israeli premier league", "liga leumit", "league of ireland", "premier division", "nifl premiership", "cymru premier", "kazakhstan premier league", "azerbaijan premier league"]
 TIER_N3 = ["major league soccer", "usl championship", "liga mx", "liga de expansión mx", "liga profesional argentina", "primera nacional", "brasileirão série a", "brasileirão série b", "serie a brazil", "serie b brazil", "chilean primera división", "colombian primera a", "liga 1 perú", "campeonato uruguayo", "ligapro ecuador", "copa libertadores", "copa sudamericana", "j1 league", "j2 league", "k league 1", "k league 2", "chinese super league", "china super league", "chinese league one", "indian super league", "saudi pro league", "roshn saudi league", "uae arabian gulf league", "qatar stars league", "persian gulf pro league", "thai league 1", "malaysian super league", "singapore premier league", "v.league 1", "a-league", "a-league men", "nrfl", "afc champions league", "afc champions league elite", "afc cup"]
-TIER_N4 = ["botola pro", "caf champions league", "caf confederation cup", "egyptian premier league", "tunisian ligue professionnelle 1", "algerian ligue professionnelle 1", "premier soccer league", "psl", "libyan premier league", "nigerian premier football league", "kenyan premier league", "tanzanian premier league", "ugandan super league", "zambia super league", "zimbabwean premier soccer league", "cameroon elite one", "senegalese ligue 1", "mtn ligue 1", "côte d'ivoire", "ghanaian premier league", "jordan pro league", "lebanese premier league", "iraqi premier league", "bahraini premier league", "omani professional league", "kuwaiti premier league", "lithuanian a lyga", "latvian higher league", "estonian meistriliiga", "belarusian premier league", "moldovan national division", "georgian erovnuli liga", "armenian premier league"]
+TIER_N4 = ["botola pro", "caf champions league", "caf confederation cup", "egyptian premier eague", "tunisian ligue professionnelle 1", "algerian ligue professionnelle 1", "premier soccer league", "psl", "libyan premier league", "nigerian premier football league", "kenyan premier league", "tanzanian premier league", "ugandan super league", "zambia super league", "zimbabwean premier soccer league", "cameroon elite one", "senegalese ligue 1", "mtn ligue 1", "côte d'ivoire", "ghanaian premier league", "jordan pro league", "lebanese premier league", "iraqi premier league", "bahraini premier league", "omani professional league", "kuwaiti premier league", "lithuanian a lyga", "latvian higher league", "estonian meistriliiga", "belarusian premier league", "moldovan national division", "georgian erovnuli liga", "armenian premier league"]
 
 BLACKLIST_KEYWORDS = ["u17", "u18", "u19", "u20", "u21", "u23", "ii", " b team", " b ", "reserves", "youth", "primavera", "jong", "amateur", "development", "academy", "filial", "reserve", "juniores", "sub-", "women", "womens", "femenil", "femenino"]
 
@@ -70,7 +70,7 @@ EDGE_MIN_TIERS  = { "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06, "N4": 0.07 }
 # ====================== FOOTYSTATS BRIDGE ======================
 def init_footystats():
     global fs_leagues_cache
-    print("🔄 [BG] Chargement FootyStats...", flush=True)
+    print("🔄 [BG] Loading FootyStats...", flush=True)
     try:
         url = f"{FS_URL}/leagues?key={FOOTYSTATS_KEY}"
         resp = requests.get(url, timeout=15)
@@ -84,11 +84,9 @@ def init_footystats():
                 cache[name] = lid
                 cache[f"{country} {name}"] = lid
             fs_leagues_cache = cache
-            print(f"✅ [BG] FootyStats: {len(cache)} ligues chargées.", flush=True)
-        else:
-            print("❌ [BG] Erreur FootyStats", flush=True)
+            print(f"✅ [BG] FootyStats: {len(cache)} leagues.", flush=True)
     except Exception as e:
-        print(f"❌ [BG] Exception FootyStats: {e}", flush=True)
+        print(f"❌ [BG] FootyStats Error: {e}", flush=True)
 
 def get_fs_team_id(team_name):
     global fs_teams_cache
@@ -278,15 +276,7 @@ def calculate_roi_report(finished_bets):
             total_profit -= 1
     roi = (total_profit / total_stake) * 100 if total_stake > 0 else 0
     win_rate = (wins / total_stake) * 100 if total_stake > 0 else 0
-    return f"""
-📊 PERFORMANCE REPORT 📊
-----------------------------
-📈 Total Paris: {total_stake}
-✅ Gagnés: {wins} ({win_rate:.1f}%)
-💰 Profit Net: {total_profit:.2f}u
-📉 ROI: {roi:.2f}%
-----------------------------
-"""
+    return f"\n📊 ROI: {roi:.2f}% | Wins: {wins}/{total_stake}"
 
 def check_results(fixtures_today):
     global tracked_bets
@@ -316,7 +306,7 @@ def check_results(fixtures_today):
                     profit = -1
                     result_icon = f"❌ PERDU (-1.00u)"
                 finished_bets.append({'is_win': is_win, 'odd': bet['odd']})
-                line = f"📅 {bet['date']}\n🏆 {bet['league']}\n⚽ {bet['home']} vs {bet['away']}\n🔮 Signal: {bet['signal_name']} @ {bet['odd']:.2f}\n🏁 Score: {score_home} - {score_away}\n{result_icon}\n------------------------"
+                line = f"📅 {bet['date']} | {bet['home']}-{bet['away']} ({score_home}-{score_away})\n{bet['signal_name']} @ {bet['odd']:.2f} -> {result_icon}"
                 report_lines.append(line)
             else:
                 still_pending.append(bet)
@@ -324,7 +314,7 @@ def check_results(fixtures_today):
             still_pending.append(bet)
     tracked_bets = still_pending
     if report_lines:
-        header = "📊 RÉSULTATS DES PRÉCÉDENTS PARIS 📊\n\n"
+        header = "📊 RESULTATS\n----------------\n"
         roi_stats = calculate_roi_report(finished_bets)
         full_report = header + "\n".join(report_lines) + roi_stats
         try:
@@ -341,14 +331,14 @@ def get_strong_signal(home_xg, away_xg, probs):
     if total_xg < 2.0: return f"🧱 MATCH FERME (xG Total {total_xg:.2f})"
     return "⚖️ EQUILIBRE TACTIQUE"
 
-def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg, source="API-Football"):
+def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg, source="API"):
     if not bot: return
     fid = fixture_info['id']
     key = f"{fid}"
     if key in sent_alerts: return
     sent_alerts.add(key)
     value_bets = [o for o in opps if o['is_value']]
-    msg = f"⚽ SOCCER ⚽\n\n{fixture_info['home']} vs {fixture_info['away']}\n🌍 {fixture_info['country']} - {fixture_info['league']}\n🕒 {fixture_info['date']} (UTC)\n\n{strong_signal}\n📊 xG Model ({source}): {hxg:.2f} - {axg:.2f}\n"
+    msg = f"⚽ {fixture_info['home']} vs {fixture_info['away']}\n🌍 {fixture_info['league']}\n🕒 {fixture_info['date']} (UTC)\n\n{strong_signal}\n📊 xG ({source}): {hxg:.2f} - {axg:.2f}\n"
     if value_bets:
         main = value_bets[0]
         selection_name = main['label']
@@ -356,26 +346,25 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg,
             if main['label'] == "HOME WIN": selection_name = fixture_info['home']
             elif main['label'] == "AWAY WIN": selection_name = fixture_info['away']
             else: selection_name = "Draw"
-        msg += f"\n🚨 VALUE BET DETECTED 🚨\nSelection: {selection_name}\nMin. Odds: 🚀{main['odd']:.2f}🚀\nEdge: +{main['edge']*100:.1f}%\nBookie: {main.get('bookie', 'Best Market')}\n"
+        msg += f"\n🚨 VALUE BET\nSelection: {selection_name}\nOdds: 🚀{main['odd']:.2f}🚀\nEdge: +{main['edge']*100:.1f}%\nBookie: {main.get('bookie', 'N/A')}\n"
         tracked_bets.append({
             "fid": fid, "home": fixture_info['home'], "away": fixture_info['away'],
             "league": fixture_info['league'], "date": fixture_info['date'],
             "signal_name": selection_name, "prediction_type": main['proba_key'], "odd": main['odd']
         })
     else:
-        msg += "\n📉 VALUE BET: Aucune value significative.\n"
+        msg += "\n📉 No Value.\n"
     try:
         bot.send_message(CHAT_ID, msg)
-        print(f"✅ Telegram envoyé pour {fid} (Source: {source})", flush=True)
+        print(f"✅ Telegram sent for {fid} ({source})", flush=True)
     except:
         pass
 
 # ====================== CHECK MAIN ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v2.1e à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v2.1f at {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
     
-    # Init FootyStats ici si pas encore fait (lazy loading)
     if not fs_leagues_cache:
         init_footystats()
 
@@ -409,8 +398,13 @@ def check_value_bets():
         s_away = get_team_stats(at['id'], lid, season)
         if not s_home or not s_away: continue
         
-        fs_data = {'home_xg': None, 'home_xga': None, 'away_xg': None, 'away_xga': None}
-        data_source = "API-Football"
+        # Default dict
+        fs_data = {}
+        fs_data['home_xg'] = None
+        fs_data['home_xga'] = None
+        fs_data['away_xg'] = None
+        fs_data['away_xga'] = None
+        data_source = "API"
         
         if FOOTYSTATS_KEY:
             tid_home = get_fs_team_id(ht['name'])
@@ -420,4 +414,15 @@ def check_value_bets():
                 xg_a, xga_a = get_footystats_xg(tid_away)
                 if xg_h and xga_a:
                     fs_data['home_xg'] = xg_h
-                    fs_data['
+                    fs_data['home_xga'] = xga_h
+                    fs_data['away_xg'] = xg_a
+                    fs_data['away_xga'] = xga_a
+                    data_source = "FootyStats"
+        
+        odds = get_odds(fid)
+        hxg, axg = calculate_strength_model(s_home, s_away, league_avg, fs_data)
+        
+        if hxg and axg:
+            probs = run_monte_carlo(hxg, axg)
+            opportunities = analyze_markets(probs, odds, tier)
+   
