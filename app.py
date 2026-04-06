@@ -1,6 +1,7 @@
 import requests
 import telebot
 import time
+import schedule  # CORRECTION: Import ajouté
 import os
 import threading
 import math
@@ -8,14 +9,14 @@ import csv
 from flask import Flask
 from datetime import datetime, timezone, timedelta
 
-print("🚀 APEX-SIRIUS v5.0 - HYBRID INTELLIGENCE", flush=True)
+print("🚀 APEX-SIRIUS v5.1 - HARDENED EDITION", flush=True)
 
 # ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS v5.0 Running", 200
+    return "🤖 APEX-SIRIUS v5.1 Running", 200
 
 @app.route('/ping')
 def ping():
@@ -55,12 +56,6 @@ def get_bankroll():
             f.write(str(INITIAL_BANKROLL))
         return INITIAL_BANKROLL
 
-def update_bankroll(amount):
-    current = get_bankroll()
-    new_val = current + amount
-    with open(BANKROLL_FILE, "w") as f:
-        f.write(f"{new_val:.2f}")
-
 def log_bet(data):
     try:
         with open(TRACKING_FILE, "a", newline='') as f:
@@ -69,30 +64,14 @@ def log_bet(data):
     except: pass
 
 # ====================== ML & FEATURES ======================
-def get_team_form(last5): # Simple ML Feature: Form Points
-    # Convertit "W,D,L,L,W" en points (3,1,0)
-    # Implement real parsing if API provides, else return neutral
-    return 0 
-
 def calculate_confidence(hxg, axg, league_tier, odds_value):
-    """
-    Light ML: Scoring heuristique.
-    Score élevé = Confiance forte.
-    """
     score = 0
-    # 1. Gap de qualité (xG Diff)
     diff = abs(hxg - axg)
     if diff > 0.8: score += 20
     if diff > 1.5: score += 10
-    
-    # 2. Qualité Ligue
-    if league_tier in ["P0", "N1"]: score += 15 # Données plus fiables
-    
-    # 3. Value Edge
+    if league_tier in ["P0", "N1"]: score += 15
     if odds_value > 0.05: score += 10
-    if odds_value > 0.10: score += 5
-    
-    return score # Max ~50-60
+    return score
 
 # ====================== FOOTYSTATS BRIDGE ======================
 fs_cache = {}
@@ -103,18 +82,16 @@ def get_fs_xg(team_name):
         if r.status_code == 200:
             data = r.json().get('data', [])
             if data:
-                # Prendre le 1er résultat team
                 tid = data[0]['id']
-                # Récupérer stats
                 r2 = requests.get(f"{FS_URL}/team?key={FOOTYSTATS_KEY}&team_id={tid}", timeout=5)
                 if r2.status_code == 200:
                     stats = r2.json().get('data', {}).get('xG', {})
-                    # Moyenne saison xG
                     xg_for = stats.get('total_xG', 0)
                     played = stats.get('matches_played', 1)
-                    val = xg_for / played if played > 0 else 1.2
-                    fs_cache[team_name] = val
-                    return val
+                    if played > 0:
+                        val = xg_for / played
+                        fs_cache[team_name] = val
+                        return val
     except: pass
     return None
 
@@ -156,20 +133,11 @@ def detect_best_value(probs, odds_data, hxg, axg, tier):
                         key = "H" if side == "Home" else "D" if side == "Draw" else "A"
                         prob_model = probs[key]
                         
-                        # --- ML WEIGHTING ---
-                        # Si FootyStats absent, on réduit la confiance
                         conf = calculate_confidence(hxg, axg, tier, prob_model - (1/odd))
-                        
                         edge = prob_model - (1/odd)
                         
-                        # --- FILTER LOSING MARKETS ---
-                        # 1. Draws filtrés sévèrement (Trop volatile)
                         if key == "D" and edge < 0.07: continue 
-                        
-                        # 2. Outsiders filtrés si pas de domination réelle
                         if key == "A" and hxg > axg and odd > 4.0: continue
-                        
-                        # 3. Favoris filtrés si sur-côtés
                         if key == "H" and hxg < axg and odd < 1.80: continue
 
                         if edge > max_edge:
@@ -201,7 +169,7 @@ def get_stats(tid, lid, season):
 
 # ====================== CHECK ======================
 def check_loop():
-    print(f"\n⏰ v5.0 Check at {datetime.now().strftime('%H:%M')}", flush=True)
+    print(f"\n⏰ v5.1 Check at {datetime.now().strftime('%H:%M')}", flush=True)
     
     fixtures = get_fixtures()
     now = datetime.now(timezone.utc)
@@ -212,36 +180,37 @@ def check_loop():
         try:
             m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
             delta_h = (m_date - now).total_seconds() / 3600
-            
-            # --- TIMING DE MARCHÉ ---
-            # On vise les early odds (2h-6h avant) ou late movement (0-1h)
             if not (0 < delta_h < 6): continue
             
-            # Blacklist
             h_name = f['teams']['home']['name']
             a_name = f['teams']['away']['name']
             if any(x in h_name.lower() or x in a_name.lower() for x in ["women", " w", "u19", "reserves"]): continue
             
-            # Data
             stats_h = get_stats(f['teams']['home']['id'], f['league']['id'], f['league']['season'])
             stats_a = get_stats(f['teams']['away']['id'], f['league']['id'], f['league']['season'])
             if not stats_h or not stats_a: continue
             
             # --- HYBRID XG ---
-            # 1. Essayer FootyStats
             hxg_fs = get_fs_xg(h_name)
             axg_fs = get_fs_xg(a_name)
             
-            # 2. Fallback API-Football
+            # CORRECTION: Safe division
             if not hxg_fs:
-                h_g = stats_h['goals']['for']['total']['total'] / stats_h['fixtures']['played']['total']
-                hxg_fs = h_g * 1.10 # Home adv
+                h_played = stats_h['fixtures']['played']['total']
+                if h_played > 0:
+                    h_g = stats_h['goals']['for']['total']['total'] / h_played
+                    hxg_fs = h_g * 1.10
+                else:
+                    hxg_fs = 1.2 # Fallback safe
             
             if not axg_fs:
-                a_g = stats_a['goals']['for']['total']['total'] / stats_a['fixtures']['played']['total']
-                axg_fs = a_g
+                a_played = stats_a['fixtures']['played']['total']
+                if a_played > 0:
+                    a_g = stats_a['goals']['for']['total']['total'] / a_played
+                    axg_fs = a_g
+                else:
+                    axg_fs = 1.0
 
-            # Calcul Probas
             probs = calculate_probs(hxg_fs, axg_fs)
             
             odds_data = get_odds(f['fixture']['id'])
@@ -250,9 +219,8 @@ def check_loop():
             best = detect_best_value(probs, odds_data, hxg_fs, axg_fs, "N1")
             
             if best and sent < 8:
-                # Envoi
                 conf_score = best['conf']
-                msg = f"""🚀 HYBRID BET v5.0
+                msg = f"""🚀 HYBRID BET v5.1
 {h_name} vs {a_name}
 🎯 {best['side']} @ {best['odd']:.2f} ({best['bookie']})
 💰 Edge: +{best['edge']*100:.1f}%
@@ -263,7 +231,6 @@ def check_loop():
                     bot.send_message(CHAT_ID, msg)
                     print(f"✅ Sent: {best['side']} @ {best['odd']}", flush=True)
                     
-                    # Log pour ROI & CLV
                     log_bet([
                         datetime.now().isoformat(), f['fixture']['id'], h_name, a_name,
                         best['side'], best['odd'], best['edge'], best['bookie'], hxg_fs, axg_fs
@@ -272,15 +239,9 @@ def check_loop():
                 except: pass
                 
         except Exception as e:
-            print(f"⚠️ Err: {e}", flush=True)
+            print(f"⚠️ Err Loop: {e}", flush=True)
             
     print(f"✅ Done. Bankroll: {bank:.1f}u", flush=True)
-
-# ====================== ROI CHECKER (BG THREAD) ======================
-def check_results():
-    # Cette fonction est appelée périodiquement pour checker les résultats passés
-    # Pour l'instant on log, le calcul ROI complet se fera sur dashboard externe ou logs
-    pass
 
 # ====================== SCHEDULER ======================
 def run():
