@@ -14,20 +14,19 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.1b - SYNTAX FIX", 200
+    return "🤖 APEX-ENGINE v2.1c - SYNTAX FINAL FIX", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.1b - STARTING", flush=True)
+print("🚀 APEX-ENGINE v2.1c - STARTING", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
 
-# --- CLE API FOOTYSTATS ---
 FOOTYSTATS_KEY = "b637867a6fca38fd2f388553abf0768840d84ded4b335ce23d97e708b7a502c6"
 
 bot = None
@@ -40,12 +39,10 @@ else:
     except Exception as e:
         print(f"❌ Erreur Telegram init: {e}", flush=True)
 
-# API URLs
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 FS_URL = "https://api.footystats.org/v2"
 
-# Caches
 sent_alerts = set()
 value_bets_history = []
 tracked_bets = []
@@ -178,14 +175,20 @@ def calculate_smart_xg(stats):
 
 def calculate_strength_model(stats_home, stats_away, league_avg, fs_data=None):
     hxg, axg = None, None
+    
+    # FootyStats Logic
     if fs_data:
-        fs_hxg, fs_hxga = fs_data['home_xg'], fs_data['home_xga']
-        fs_axg, fs_axga = fs_data['away_xg'], fs_data['away_xga']
+        fs_hxg = fs_data.get('home_xg')
+        fs_hxga = fs_data.get('home_xga')
+        fs_axg = fs_data.get('away_xg')
+        fs_axga = fs_data.get('away_xga')
+        
         if all([fs_hxg, fs_hxga, fs_axg, fs_axga]):
             hxg = fs_hxg * 1.10
             axg = fs_axg
             return hxg, axg
 
+    # Fallback Logic
     home_attack = calculate_smart_xg(stats_home)
     away_attack = calculate_smart_xg(stats_away)
     
@@ -344,7 +347,7 @@ def check_results(fixtures_today):
             if bot: bot.send_message(CHAT_ID, full_report)
         except: pass
 
-# ====================== NOTIFICATION (CORRECTED) ======================
+# ====================== NOTIFICATION ======================
 def get_strong_signal(home_xg, away_xg, probs):
     xg_diff = home_xg - away_xg
     total_xg = home_xg + away_xg
@@ -363,10 +366,7 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg,
 
     value_bets = [o for o in opps if o['is_value']]
     
-    msg = f"⚽ SOCCER ⚽\n\n{fixture_info['home']} vs {fixture_info['away']}\n"
-    msg += f"🌍 {fixture_info['country']} - {fixture_info['league']}\n"
-    msg += f"🕒 {fixture_info['date']} (UTC)\n\n{strong_signal}\n"
-    msg += f"📊 xG Model ({source}): {hxg:.2f} - {axg:.2f}\n"
+    msg = f"⚽ SOCCER ⚽\n\n{fixture_info['home']} vs {fixture_info['away']}\n🌍 {fixture_info['country']} - {fixture_info['league']}\n🕒 {fixture_info['date']} (UTC)\n\n{strong_signal}\n📊 xG Model ({source}): {hxg:.2f} - {axg:.2f}\n"
 
     if value_bets:
         main = value_bets[0]
@@ -376,9 +376,7 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg,
             elif main['label'] == "AWAY WIN": selection_name = fixture_info['away']
             else: selection_name = "Draw"
 
-        msg += f"\n🚨 VALUE BET DETECTED 🚨\nSelection: {selection_name}\n"
-        msg += f"Min. Odds: {main['odd']:.2f}\nEdge: +{main['edge']*100:.1f}%\n"
-        msg += f"Bookie: {main.get('bookie', 'Best Market')}\n"
+        msg += f"\n🚨 VALUE BET DETECTED 🚨\nSelection: {selection_name}\nMin. Odds: 🚀{main['odd']:.2f}🚀\nEdge: +{main['edge']*100:.1f}%\nBookie: {main.get('bookie', 'Best Market')}\n"
         
         tracked_bets.append({
             "fid": fid, "home": fixture_info['home'], "away": fixture_info['away'],
@@ -390,7 +388,6 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg,
 
     try:
         bot.send_message(CHAT_ID, msg)
-        # Ligne corrigée (plus simple)
         print(f"✅ Telegram envoyé pour {fid} (Source: {source})", flush=True)
     except:
         pass
@@ -398,7 +395,7 @@ def envoyer_notification(opps, fixture_info, dcs, tier, strong_signal, hxg, axg,
 # ====================== CHECK MAIN ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v2.1b à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v2.1c à {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
     
     fixtures = get_fixtures()
     if not fixtures: return
@@ -441,4 +438,6 @@ def check_value_bets():
             tid_home = get_fs_team_id(ht['name'])
             tid_away = get_fs_team_id(at['name'])
             
-            if tid_home and tid_aw
+            # LIGNE CORRIGEE (Problème tronqué)
+            if tid_home and tid_away:
+                xg_h, xga_h = g
