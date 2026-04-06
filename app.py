@@ -1,67 +1,59 @@
 import requests
 import telebot
 import time
+import schedule
 import os
 import threading
 import math
+import csv
 from flask import Flask
 from datetime import datetime, timezone, timedelta
 
-# ====================== FLASK APP ======================
+print("🚀 APEX-SIRIUS v4.3 - TIME FIX & DEBUG", flush=True)
+
+# ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.7 - SWEET SPOT", 200
+    return "🤖 APEX-SIRIUS v4.3 Running", 200
 
-@app.route('/ping', methods=['GET', 'HEAD'])
+@app.route('/ping')
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.7 - SWEET SPOT", flush=True)
-
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
-FOOTYSTATS_KEY = "b637867a6fca38fd2f388553abf0768840d84ded4b335ce23d97e708b7a502c6"
+FOOTYSTATS_KEY = os.environ.get("FOOTYSTATS_KEY")
 
 bot = None
-if not all([BOT_TOKEN, CHAT_ID, API_KEY]):
-    print("❌ ERREUR: Variables manquantes.", flush=True)
-else:
+if all([BOT_TOKEN, CHAT_ID, API_KEY]):
     try:
         bot = telebot.TeleBot(BOT_TOKEN)
-        print("✅ Bot Telegram OK", flush=True)
+        print("✅ Telegram Bot initialisé", flush=True)
     except Exception as e:
         print(f"❌ Erreur Telegram: {e}", flush=True)
+else:
+    print("❌ Variables d'environnement manquantes", flush=True)
 
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS = {"x-apisports-key": API_KEY}
 
-sent_alerts = set()
+# ====================== TRACKING ======================
+TRACKING_FILE = "/tmp/apex_tracking.csv"
 
-# ====================== CONSTANTS ======================
-MAX_BETS_PER_SESSION = 5
-RHO = 0.10
-
-# Ligues Reconnues (Tiers)
-TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
-TIER_N1 = ["premier league", "championship", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league", "scottish premiership"]
-TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl", "damallsvenskan", "nwsl"] # Ajout ligues scandi
-TIER_N3 = ["major league soccer", "liga mx", "liga profesional argentina", "brasileirão", "j1 league", "k league 1", "saudi pro league"]
-
-# Blacklist Dur (Femmes, Jeunes, Réserves)
-BLACKLIST_KEYWORDS = [
-    "u17", "u18", "u19", "u20", "u21", "u23", 
-    "ii", " b ", "reserves", "youth", "women", "womens", "femenil", "amateur",
-    " w", "(w)", " damallsvenskan" # Ciblage nom équipe
-]
-
-# ====================== MATH ENGINE ======================
-def poisson_prob(lmbda, k):
+def log_bet(match, market, side, odd, prob, edge, stake):
     try:
-        return (math.exp(-lmbda) * (lmbda ** k)) / math.factorial(k)
+        with open(TRACKING_FILE, "a", newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([datetime.now().isoformat(), match, market, side, odd, prob, edge, stake])
+    except: pass
+
+# ====================== MATH ======================
+def poisson_prob(lmbda, k):
+    try: return (math.exp(-lmbda) * (lmbda ** k)) / math.factorial(k)
     except: return 0.0
 
 def calculate_match_probabilities(hxg, axg):
@@ -72,89 +64,72 @@ def calculate_match_probabilities(hxg, axg):
     for h in range(7):
         for a in range(7):
             p = hp[h] * ap[a]
-            if h == 0 and a == 0: p *= (1 - RHO)
-            elif h == 1 and a == 0: p *= (1 + RHO)
-            elif h == 0 and a == 1: p *= (1 + RHO)
-            elif h == 1 and a == 1: p *= (1 - RHO)
+            if h == 0 and a == 0: p *= 0.90
+            elif h == 1 and a == 0: p *= 1.10
+            elif h == 0 and a == 1: p *= 1.10
+            elif h == 1 and a == 1: p *= 0.90
             if h > a: probs["H"] += p
             elif h == a: probs["D"] += p
             else: probs["A"] += p
+    total = sum(probs.values())
+    if total > 0: probs = {k: v / total for k, v in probs.items()}
     return probs
 
-def calibrate_probability(p):
-    return 0.85 * p
+def derive_markets(hxg, axg):
+    probs = calculate_match_probabilities(hxg, axg)
+    total_goals = hxg + axg
+    over25 = 1 - sum(poisson_prob(total_goals, k) for k in range(3))
+    btts = (1 - poisson_prob(hxg, 0)) * (1 - poisson_prob(axg, 0))
+    return {"1X2": probs, "O2.5": over25, "BTTS": btts}
 
-# ====================== VALUE DETECTOR ======================
-def detect_value(probs, odds_data, hxg, axg):
-    opps = []
-    if not odds_data: return []
-    
-    best = {"Home": (0, "N/A"), "Draw": (0, "N/A"), "Away": (0, "N/A")}
+# ====================== VALUE ======================
+def compute_edge(prob, odd):
+    return prob - (1 / odd)
+
+def kelly_fraction(prob, odd, fraction=0.5):
+    if odd <= 1: return 0
+    return max((prob * odd - 1) / (odd - 1), 0) * fraction
+
+def detect_value(markets, odds_data):
+    opportunities = []
+    for side_key, side_name in [("H", "Home"), ("D", "Draw"), ("A", "Away")]:
+        prob = markets["1X2"][side_key]
+        for bm_data in odds_data:
+            for bm in bm_data.get('bookmakers', []):
+                for bet in bm.get('bets', []):
+                    if bet['name'] == "Match Winner":
+                        for v in bet.get('values', []):
+                            if v['value'] == side_name:
+                                odd = float(v['odd'])
+                                edge = compute_edge(prob, odd)
+                                # Debug visible
+                                # print(f"   [CHECK] {side_name} @ {odd:.2f} | Edge {edge*100:.1f}%", flush=True)
+                                if edge > 0.02:
+                                    opportunities.append({
+                                        "market": "1X2", "side": side_name, "prob": prob,
+                                        "odd": odd, "edge": edge, "stake": kelly_fraction(prob, odd)
+                                    })
+
+    # Over 2.5
+    prob = markets["O2.5"]
     for bm_data in odds_data:
         for bm in bm_data.get('bookmakers', []):
-            bn = bm['name']
-            for bet in bm['bets']:
-                if bet['name'] == "Match Winner":
-                    for v in bet['values']:
-                        odd = float(v['odd'])
-                        side = v['value']
-                        if odd > best[side][0]:
-                            best[side] = (odd, bn)
+            for bet in bm.get('bets', []):
+                if bet['name'] == "Goals Over/Under":
+                    for v in bet.get('values', []):
+                        if "Over 2.5" in v['value']:
+                            odd = float(v['odd'])
+                            edge = compute_edge(prob, odd)
+                            if edge > 0.02:
+                                opportunities.append({
+                                    "market": "O2.5", "side": "Over", "prob": prob,
+                                    "odd": odd, "edge": edge, "stake": kelly_fraction(prob, odd)
+                                })
 
-    markets = [
-        {"key": "H", "side": "Home"},
-        {"key": "D", "side": "Draw"},
-        {"key": "A", "side": "Away"}
-    ]
+    opportunities.sort(key=lambda x: x['edge'], reverse=True)
+    return opportunities[:3]
 
-    for m in markets:
-        raw_prob = probs[m['key']]
-        prob = calibrate_probability(raw_prob)
-        odd, bookie = best[m['side']]
-        
-        if odd < 1.50: continue
-        
-        # FIX 1: Cote Max relevée à 5.50
-        if odd > 5.50: continue
-        
-        # FIX 2: Proba Min relevée à 25%
-        if prob < 0.25: continue
-        
-        # FIX 3: Gap xG relaxé (bloque seulement si ultra serré < 0.2)
-        if abs(hxg - axg) < 0.2:
-            continue
-
-        roi = (prob * odd) - 1.0
-        if roi < 0.05: continue
-
-        opps.append({
-            "type": "1X2", "label": m['side'].upper(), "odd": odd,
-            "roi": roi, "prob": prob, "proba_key": m['key'], "bookie": bookie
-        })
-
-    if opps:
-        opps.sort(key=lambda x: x['roi'], reverse=True)
-        return [opps[0]]
-    return []
-
-# ====================== HELPERS ======================
-def get_league_tier(lname, country):
-    lname = lname.lower()
-    for kw in BLACKLIST_KEYWORDS:
-        if kw in lname: return "BLACKLIST"
-    if any(x in lname for x in TIER_P0): return "P0"
-    if any(x in lname for x in TIER_N1): return "N1"
-    if any(x in lname for x in TIER_N2): return "N2"
-    if any(x in lname for x in TIER_N3): return "N3"
-    return "UNKNOWN"
-
-def check_blacklist_teams(home, away):
-    h = home.lower()
-    a = away.lower()
-    for kw in BLACKLIST_KEYWORDS:
-        if kw in h or kw in a: return True
-    return False
-
+# ====================== FEATURES ======================
 def safe_api_call(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
@@ -162,109 +137,126 @@ def safe_api_call(url):
     except: pass
     return None
 
-def get_fixtures():
-    return safe_api_call(f"{BASE_URL}/fixtures?date={time.strftime('%Y-%m-%d')}").get('response', [])
-
 def get_team_stats(tid, lid, season):
     return safe_api_call(f"{BASE_URL}/teams/statistics?team={tid}&league={lid}&season={season}").get('response')
 
-def get_odds(fid):
-    return safe_api_call(f"{BASE_URL}/odds?fixture={fid}").get('response', [])
-
-# ====================== NOTIFICATION ======================
-def notify(opp, info, hxg, axg):
-    if not bot: return
-    fid = info['id']
-    if fid in sent_alerts: return
-    sent_alerts.add(fid)
-
-    sel = opp['label']
-    if opp['label'] == "HOME": sel = info['home']
-    if opp['label'] == "AWAY": sel = info['away']
-
-    msg = f"⚽ {info['home']} vs {info['away']}\n"
-    msg += f"🌍 {info['league']}\n\n"
-    msg += f"📊 xG: {hxg:.2f} - {axg:.2f}\n"
-    msg += f"🚨 PRO BET\nSelection: {sel}\nCote: {opp['odd']:.2f}\nROI Estimé: +{opp['roi']*100:.1f}%"
-
+def build_features(fixture):
     try:
-        bot.send_message(CHAT_ID, msg)
-        print(f"✅ SENT: {sel} @ {opp['odd']:.2f} (ROI +{opp['roi']*100:.0f}%)", flush=True)
-    except: pass
+        lid = fixture['league']['id']
+        season = fixture['league']['season']
+        ht_id = fixture['teams']['home']['id']
+        at_id = fixture['teams']['away']['id']
 
-# ====================== MAIN CHECK ======================
+        s_home = get_team_stats(ht_id, lid, season)
+        s_away = get_team_stats(at_id, lid, season)
+
+        if not s_home or not s_away: return 1.35, 1.20
+
+        # Stats Domicile pour Home
+        h_goals_home = s_home['goals']['for']['total']['home']
+        h_matches_home = s_home['fixtures']['played']['home']
+        hxg = h_goals_home / h_matches_home if h_matches_home > 0 else 1.2
+
+        # Stats Extérieur pour Away
+        a_goals_away = s_away['goals']['for']['total']['away']
+        a_matches_away = s_away['fixtures']['played']['away']
+        axg = a_goals_away / a_matches_away if a_matches_away > 0 else 1.0
+
+        return hxg * 1.10, axg
+    except:
+        return 1.35, 1.20
+
+# ====================== API ======================
+def get_fixtures():
+    today = time.strftime("%Y-%m-%d")
+    data = safe_api_call(f"{BASE_URL}/fixtures?date={today}")
+    return data.get('response', []) if data else []
+
+def get_odds(fid):
+    data = safe_api_call(f"{BASE_URL}/odds?fixture={fid}")
+    return data.get('response', []) if data else []
+
+# ====================== CHECK ======================
 def check_value_bets():
-    if not API_KEY: return
-    print(f"\n⏰ Check v2.7", flush=True)
-
-    if len(sent_alerts) >= MAX_BETS_PER_SESSION:
-        print(f"🛑 QUOTA ATTEINT", flush=True)
-        return
+    print(f"\n⏰ Check v4.3 à {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     fixtures = get_fixtures()
-    if not fixtures: return
-    
-    now = datetime.now(timezone.utc)
-    processed = 0
-    
-    for f in fixtures[:100]: 
-        try:
-            m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
-            if not (timedelta(minutes=0) < (m_date - now) < timedelta(hours=6)): continue
-        except: continue
+    print(f"📊 {len(fixtures)} matchs chargés", flush=True)
 
-        tier = get_league_tier(f['league']['name'], f['league']['country'])
-        if tier == "BLACKLIST" or tier == "UNKNOWN": continue
-        
-        h_name = f['teams']['home']['name']
-        a_name = f['teams']['away']['name']
-        if check_blacklist_teams(h_name, a_name): continue
-        
-        fid = f['fixture']['id']
-        
-        s_home = get_team_stats(f['teams']['home']['id'], f['league']['id'], f['league']['season'])
-        s_away = get_team_stats(f['teams']['away']['id'], f['league']['id'], f['league']['season'])
-        if not s_home or not s_away: continue
-        
+    now = datetime.now(timezone.utc)
+    count_analyzed = 0
+    count_value = 0
+
+    for f in fixtures[:60]:
+        # === FIX TIMEZONE (CRITICAL) ===
         try:
-            h_avg = s_home['goals']['for']['total']['total'] / s_home['fixtures']['played']['total']
-            a_avg = s_away['goals']['for']['total']['total'] / s_away['fixtures']['played']['total']
+            raw_date = f['fixture']['date']
+            m_date = datetime.fromisoformat(raw_date.replace('Z', '+00:00'))
             
-            home_advantage = 0.15
-            hxg = h_avg + home_advantage
-            axg = a_avg
-        except:
+            # Si la date est "naive" (sans tz), on force UTC
+            if m_date.tzinfo is None:
+                m_date = m_date.replace(tzinfo=timezone.utc)
+            
+            # Filtre Temps : Matchs passés de moins de 2h OU futurs dans moins de 6h
+            # On elargit pour capter les matchs en cours/terminés récemment pour debug
+            if not (now - timedelta(hours=2) <= m_date <= now + timedelta(hours=6)):
+                continue
+            
+        except Exception as e:
+            print(f"⚠️ Erreur Date: {e}", flush=True)
             continue
 
-        odds = get_odds(fid)
-        probs = calculate_match_probabilities(hxg, axg)
+        count_analyzed += 1
         
-        opps = detect_value(probs, odds, hxg, axg)
-        
-        if opps:
-            info = {
-                'id': fid, 'league': f['league']['name'], 
-                'home': h_name, 'away': a_name
-            }
-            notify(opps[0], info, hxg, axg)
-            if len(sent_alerts) >= MAX_BETS_PER_SESSION: break
-        
-        processed += 1
-        time.sleep(0.3)
+        home = f['teams']['home']['name']
+        away = f['teams']['away']['name']
+        league_name = f['league']['name']
+        country = f['league'].get('country', 'N/A')
+        date_time = f['fixture']['date'][:16].replace('T', ' ')
 
-    print(f"✅ Check done: {processed} analyzed. Total bets: {len(sent_alerts)}", flush=True)
+        print(f"🔎 Analyse: {home} vs {away} ({league_name})", flush=True)
 
-# ====================== LOOP ======================
-def run_loop():
-    print("🗓️ Loop started.", flush=True)
+        hxg, axg = build_features(f)
+        markets = derive_markets(hxg, axg)
+        odds_data = get_odds(f['fixture']['id'])
+
+        opportunities = detect_value(markets, odds_data)
+
+        for opp in opportunities:
+            count_value += 1
+            stake = opp['stake'] * 100
+            msg = f"""🚨 APEX v4.3 VALUE BET
+
+🌍 {country} | 🏆 {league_name}
+🕒 {date_time}
+
+{home} vs {away}
+🎯 {opp['market']} - {opp['side']}
+💰 Cote : {opp['odd']:.2f}
+📈 Proba : {opp['prob']:.1%}
+⚡ Edge : +{opp['edge']*100:.1f}%
+💵 Stake : {stake:.1f}%"""
+
+            try:
+                bot.send_message(CHAT_ID, msg)
+                print(f"✅ Sent : {opp['side']} @ {opp['odd']:.2f}", flush=True)
+                log_bet(f"{home} vs {away}", opp['market'], opp['side'], opp['odd'], opp['prob'], opp['edge'], stake)
+            except: pass
+
+    print(f"✅ Terminé: {count_analyzed} analysés | {count_value} alerts\n", flush=True)
+
+# ====================== SCHEDULER ======================
+def run_scheduler():
+    print("🗓️ Scheduler (30 min)", flush=True)
+    time.sleep(15)
+    check_value_bets()
+    schedule.every(30).minutes.do(check_value_bets)
     while True:
-        try: check_value_bets()
-        except Exception as e:
-            print(f"❌ Loop Error: {e}", flush=True)
-        time.sleep(900)
+        schedule.run_pending()
+        time.sleep(1)
 
 if bot:
-    threading.Thread(target=run_loop, daemon=True).start()
+    threading.Thread(target=run_scheduler, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
