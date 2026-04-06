@@ -24,8 +24,9 @@ print("🚀 APEX-ENGINE v2.8 - UNLEASHED & CALIBRATED", flush=True)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
+FOOTYSTATS_KEY = os.environ.get("FOOTYSTATS_KEY")
 
-FOOTYSTATS_KEY = "b637867a6fca38fd2f388553abf0768840d84ded4b335ce23d97e708b7a502c6"
+
 
 bot = None
 if not all([BOT_TOKEN, CHAT_ID, API_KEY]):
