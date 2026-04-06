@@ -2,7 +2,6 @@ import requests
 import telebot
 import time
 import os
-import sys
 import threading
 import math
 from flask import Flask
@@ -13,14 +12,14 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.2 - ROBUST", 200
+    return "🤖 APEX-ENGINE v2.3 - UNLEASHED", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.2 - RESTART", flush=True)
+print("🚀 APEX-ENGINE v2.3 - UNLEASHED MODE", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -51,7 +50,7 @@ RHO = 0.10
 COTE_MIN = 1.40
 COTE_MAX = 8.00
 
-# Whitelists (raccourcies pour lisibilité, à compléter si besoin)
+# Whitelists (On garde pour le DCS, mais on n'exclura plus UNKNOWN)
 TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
 TIER_N1 = ["premier league", "championship", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league"]
 TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl"]
@@ -60,8 +59,8 @@ TIER_N4 = ["botola pro", "egyptian premier league", "tunisian ligue professionne
 
 BLACKLIST_KEYWORDS = ["u17", "u18", "u19", "u20", "u21", "u23", "ii", " b ", "reserves", "youth", "women", "womens", "femenil"]
 
-DCS_MIN_TIERS = { "P0": 65, "N1": 65, "N2": 70, "N3": 75, "N4": 78 }
-EDGE_MIN_TIERS  = { "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06, "N4": 0.07 }
+DCS_MIN_TIERS = { "P0": 65, "N1": 65, "N2": 70, "N3": 75, "N4": 78, "UNKNOWN": 80 } # Seuil plus dur pour inconnus
+EDGE_MIN_TIERS  = { "P0": 0.05, "N1": 0.05, "N2": 0.05, "N3": 0.06, "N4": 0.07, "UNKNOWN": 0.10 } # Edge élevé pour inconnus
 
 # ====================== FOOTYSTATS BRIDGE ======================
 def get_fs_team_id(team_name):
@@ -135,36 +134,27 @@ def calculate_smart_xg(stats):
     except: return 1.3
 
 def calculate_strength_model(stats_home, stats_away, fs_data=None):
-    # 1. FootyStats Priorité
     if fs_data:
         hxg = fs_data.get('home_xg')
         axg = fs_data.get('away_xg')
         if hxg and axg:
             return hxg * 1.10, axg
 
-    # 2. Fallback API
     home_attack = calculate_smart_xg(stats_home)
     away_attack = calculate_smart_xg(stats_away)
-    
-    # Simplifié pour robustesse
     hxg = home_attack * 1.1
     axg = away_attack
-    
     return hxg, axg
 
 def run_monte_carlo(hxg, axg):
     probs = {"H": 0, "D": 0, "A": 0, "O25": 0}
-    # Calcul matriciel simple (Poisson approx)
-    # Juste une approx rapide pour éviter le crash si hxg est étrange
     try:
-        # Home prob ~ hxg / (hxg + axg)
         total = hxg + axg
         if total == 0: return probs
-        
-        probs['H'] = (hxg / total) * 0.9 # Adjustement empirique
+        probs['H'] = (hxg / total) * 0.9 
         probs['A'] = (axg / total) * 0.9
         probs['D'] = 1.0 - probs['H'] - probs['A']
-        probs['O25'] = min(1.0, (hxg + axg) / 3.0) # Approx linéaire
+        probs['O25'] = min(1.0, (hxg + axg) / 3.0)
     except: pass
     return probs
 
@@ -188,7 +178,7 @@ def analyze_markets(model_probs, odds_data, tier):
                             best_odds[key] = odd
                             best_bookie[key] = bm_name
 
-    edge_min = EDGE_MIN_TIERS[tier]
+    edge_min = EDGE_MIN_TIERS.get(tier, 0.10) # Default 10% si inconnu
     
     for key, prob_key in [("Home", "H"), ("Draw", "D"), ("Away", "A")]:
         odd = best_odds[key]
@@ -218,26 +208,20 @@ def envoyer_notification(opps, fixture_info, tier, hxg, axg, source="API"):
         else: sel_name = "Draw"
 
     msg = f"⚽ {fixture_info['home']} vs {fixture_info['away']}\n"
-    msg += f"🌍 {fixture_info['league']}\n\n"
+    msg += f"🌍 {fixture_info['league']} ({tier})\n\n"
     msg += f"📊 xG ({source}): {hxg:.2f} - {axg:.2f}\n"
     msg += f"🚨 VALUE BET\nSelection: {sel_name}\nOdds: 🚀{main['odd']:.2f}🚀\nEdge: +{main['edge']*100:.1f}%"
 
     try:
         bot.send_message(CHAT_ID, msg)
         print(f"✅ TELEGRAM SENT FOR {fid}", flush=True)
-        # Track
-        tracked_bets.append({
-            "fid": fid, "home": fixture_info['home'], "away": fixture_info['away'],
-            "league": fixture_info['league'], "date": fixture_info['date'],
-            "signal_name": sel_name, "prediction_type": main['proba_key'], "odd": main['odd']
-        })
     except Exception as e:
         print(f"❌ Telegram Error: {e}", flush=True)
 
 # ====================== CHECK MAIN ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v2.2 at {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
+    print(f"\n⏰ Check v2.3 at {datetime.now(timezone.utc).strftime('%H:%M:%S')}", flush=True)
 
     fixtures = get_fixtures()
     if not fixtures: return
@@ -248,34 +232,44 @@ def check_value_bets():
     for f in fixtures:
         try:
             m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
-            if not (timedelta(minutes=0) < (m_date - now) < timedelta(minutes=60)): continue
+            
+            # CORRECTION 1: Fenêtre temps 6h
+            if not (timedelta(minutes=0) < (m_date - now) < timedelta(hours=6)):
+                continue
         except: continue
 
         lname = f['league']['name']
         tier = get_league_tier(lname, f['league']['country'])
-        if tier in ["BLACKLIST", "UNKNOWN"]: continue
         
-        if count >= 10: break
+        # CORRECTION 2: On ne rejette que BLACKLIST
+        if tier == "BLACKLIST": continue
+        
+        # CORRECTION 3: Pas de limite de count
         count += 1
         
         fid = f['fixture']['id']
+        ht = f['teams']['home']['name']
+        at = f['teams']['away']['name']
+        
+        # DEBUG LOG 1
+        print(f"🔎 Match: {ht} vs {at} | Tier: {tier}", flush=True)
         
         s_home = get_team_stats(f['teams']['home']['id'], f['league']['id'], f['league']['season'])
         s_away = get_team_stats(f['teams']['away']['id'], f['league']['id'], f['league']['season'])
-        if not s_home or not s_away: continue
+        if not s_home or not s_away:
+            print(f"   ⚠️ Stats missing, skip.", flush=True)
+            continue
         
-        # Correct Dictionary Init
-        fs_data = {
-            'home_xg': None,
-            'home_xga': None,
-            'away_xg': None,
-            'away_xga': None
-        }
+        fs_data = {'home_xg': None, 'home_xga': None, 'away_xg': None, 'away_xga': None}
         data_source = "API"
         
         if FOOTYSTATS_KEY:
-            tid_home = get_fs_team_id(f['teams']['home']['name'])
-            tid_away = get_fs_team_id(f['teams']['away']['name'])
+            tid_home = get_fs_team_id(ht)
+            tid_away = get_fs_team_id(at)
+            
+            # DEBUG LOG 2
+            print(f"   🔗 FS IDs: {tid_home} / {tid_away}", flush=True)
+            
             if tid_home and tid_away:
                 xg_h, xga_h = get_footystats_xg(tid_home)
                 xg_a, xga_a = get_footystats_xg(tid_away)
@@ -289,9 +283,6 @@ def check_value_bets():
         odds = get_odds(fid)
         hxg, axg = calculate_strength_model(s_home, s_away, fs_data)
         
-        # Logs debug
-        print(f"DEBUG: {f['teams']['home']['name']} HXG={hxg:.2f} AXG={axg:.2f} Source={data_source}", flush=True)
-
         if hxg and axg:
             probs = run_monte_carlo(hxg, axg)
             opportunities = analyze_markets(probs, odds, tier)
@@ -299,7 +290,7 @@ def check_value_bets():
             if opportunities:
                 info = {
                     'id': fid, 'league': lname, 'country': f['league']['country'],
-                    'home': f['teams']['home']['name'], 'away': f['teams']['away']['name'],
+                    'home': ht, 'away': at,
                     'date': f['fixture']['date'][:16].replace('T', ' ')
                 }
                 envoyer_notification(opportunities, info, tier, hxg, axg, data_source)
@@ -308,7 +299,7 @@ def check_value_bets():
         
     print(f"✅ Check done: {count} analyzed.", flush=True)
 
-# ====================== SCHEDULER (FIXED) ======================
+# ====================== SCHEDULER ======================
 def run_scheduler():
     print("🗓️ Worker thread started.", flush=True)
     while True:
@@ -316,11 +307,8 @@ def run_scheduler():
             check_value_bets()
         except Exception as e:
             print(f"❌ Loop error: {e}", flush=True)
-        
-        # Sleep 15 minutes
         time.sleep(900)
 
-# Start Thread
 if bot:
     threading.Thread(target=run_scheduler, daemon=True).start()
 
