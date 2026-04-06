@@ -12,18 +12,19 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-ENGINE v2.7 - SWEET SPOT", 200
+    return "🤖 APEX-ENGINE v2.8 - THE TRUTH", 200
 
 @app.route('/ping', methods=['GET', 'HEAD'])
 def ping():
     return "pong", 200
 
 # ====================== CONFIG ======================
-print("🚀 APEX-ENGINE v2.7 - SWEET SPOT", flush=True)
+print("🚀 APEX-ENGINE v2.8 - UNLEASHED & CALIBRATED", flush=True)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 API_KEY = os.environ.get("API_KEY")
+
 FOOTYSTATS_KEY = "b637867a6fca38fd2f388553abf0768840d84ded4b335ce23d97e708b7a502c6"
 
 bot = None
@@ -42,20 +43,20 @@ HEADERS = {"x-apisports-key": API_KEY}
 sent_alerts = set()
 
 # ====================== CONSTANTS ======================
-MAX_BETS_PER_SESSION = 5
+MAX_BETS_PER_SESSION = 10 # Remonté à 10 pour avoir de la data
 RHO = 0.10
 
-# Ligues Reconnues (Tiers)
+# Ligues (Nettoyé pour matcher exactement les noms API-Football)
 TIER_P0 = ["uefa champions league", "uefa europa league", "uefa europa conference league"]
 TIER_N1 = ["premier league", "championship", "la liga", "bundesliga", "ligue 1", "serie a", "eredivisie", "liga portugal", "primeira liga", "jupiler pro league", "scottish premiership"]
-TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl", "damallsvenskan", "nwsl"] # Ajout ligues scandi
+TIER_N2 = ["süper lig", "super lig", "russian premier league", "super league 1", "bundesliga autrichienne", "super league suisse", "superliga", "allsvenskan", "eliteserien", "ekstraklasa", "czech first league", "otp bank liga", "liga 1", "hnl", "danish superliga"]
 TIER_N3 = ["major league soccer", "liga mx", "liga profesional argentina", "brasileirão", "j1 league", "k league 1", "saudi pro league"]
 
-# Blacklist Dur (Femmes, Jeunes, Réserves)
+# Blacklist (Femmes, Jeunes, Réserves)
 BLACKLIST_KEYWORDS = [
     "u17", "u18", "u19", "u20", "u21", "u23", 
     "ii", " b ", "reserves", "youth", "women", "womens", "femenil", "amateur",
-    " w", "(w)", " damallsvenskan" # Ciblage nom équipe
+    " w", "(w)"
 ]
 
 # ====================== MATH ENGINE ======================
@@ -82,9 +83,10 @@ def calculate_match_probabilities(hxg, axg):
     return probs
 
 def calibrate_probability(p):
+    # Shrinkage 15%
     return 0.85 * p
 
-# ====================== VALUE DETECTOR ======================
+# ====================== VALUE DETECTOR (UNLEASHED) ======================
 def detect_value(probs, odds_data, hxg, axg):
     opps = []
     if not odds_data: return []
@@ -114,24 +116,28 @@ def detect_value(probs, odds_data, hxg, axg):
         
         if odd < 1.50: continue
         
-        # FIX 1: Cote Max relevée à 5.50
-        if odd > 5.50: continue
+        # NOUVEAUX FILTRES ASSOUPLIS
         
-        # FIX 2: Proba Min relevée à 25%
-        if prob < 0.25: continue
+        # 1. Hard cap haut
+        if odd > 12.00: continue
         
-        # FIX 3: Gap xG relaxé (bloque seulement si ultra serré < 0.2)
-        if abs(hxg - axg) < 0.2:
-            continue
+        # 2. Filtre intelligent outsiders
+        if odd > 8.00 and prob < 0.18: continue
+        
+        # 3. Plancher proba bas
+        if prob < 0.15: continue
 
         roi = (prob * odd) - 1.0
-        if roi < 0.05: continue
+        
+        # Seuil ROI conservateur
+        if roi < 0.03: continue
 
         opps.append({
             "type": "1X2", "label": m['side'].upper(), "odd": odd,
             "roi": roi, "prob": prob, "proba_key": m['key'], "bookie": bookie
         })
 
+    # On garde le meilleur bet
     if opps:
         opps.sort(key=lambda x: x['roi'], reverse=True)
         return [opps[0]]
@@ -139,13 +145,19 @@ def detect_value(probs, odds_data, hxg, axg):
 
 # ====================== HELPERS ======================
 def get_league_tier(lname, country):
-    lname = lname.lower()
+    lname = lname.lower().strip()
+    
+    # Normalisation rapide
+    lname = lname.replace(" - ", " ")
+    
     for kw in BLACKLIST_KEYWORDS:
         if kw in lname: return "BLACKLIST"
+    
     if any(x in lname for x in TIER_P0): return "P0"
     if any(x in lname for x in TIER_N1): return "N1"
     if any(x in lname for x in TIER_N2): return "N2"
     if any(x in lname for x in TIER_N3): return "N3"
+    
     return "UNKNOWN"
 
 def check_blacklist_teams(home, away):
@@ -185,17 +197,17 @@ def notify(opp, info, hxg, axg):
     msg = f"⚽ {info['home']} vs {info['away']}\n"
     msg += f"🌍 {info['league']}\n\n"
     msg += f"📊 xG: {hxg:.2f} - {axg:.2f}\n"
-    msg += f"🚨 PRO BET\nSelection: {sel}\nCote: {opp['odd']:.2f}\nROI Estimé: +{opp['roi']*100:.1f}%"
+    msg += f"🚨 BET\nSelection: {sel}\nCote: {opp['odd']:.2f}\nROI: +{opp['roi']*100:.1f}%"
 
     try:
         bot.send_message(CHAT_ID, msg)
-        print(f"✅ SENT: {sel} @ {opp['odd']:.2f} (ROI +{opp['roi']*100:.0f}%)", flush=True)
+        print(f"✅ SENT: {sel} @ {opp['odd']:.2f}", flush=True)
     except: pass
 
 # ====================== MAIN CHECK ======================
 def check_value_bets():
     if not API_KEY: return
-    print(f"\n⏰ Check v2.7", flush=True)
+    print(f"\n⏰ Check v2.8", flush=True)
 
     if len(sent_alerts) >= MAX_BETS_PER_SESSION:
         print(f"🛑 QUOTA ATTEINT", flush=True)
@@ -207,14 +219,21 @@ def check_value_bets():
     now = datetime.now(timezone.utc)
     processed = 0
     
-    for f in fixtures[:100]: 
+    for f in fixtures[:120]: 
         try:
             m_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
             if not (timedelta(minutes=0) < (m_date - now) < timedelta(hours=6)): continue
         except: continue
 
-        tier = get_league_tier(f['league']['name'], f['league']['country'])
-        if tier == "BLACKLIST" or tier == "UNKNOWN": continue
+        lname = f['league']['name']
+        tier = get_league_tier(lname, f['league']['country'])
+        
+        # DEBUG TIER (Pour voir pourquoi ça bloque)
+        # print(f"🔎 Tier: {tier} | League: {lname}", flush=True)
+        
+        if tier == "BLACKLIST": continue
+        # On garde UNKNOWN pour l'instant pour voir ce que ça donne
+        # if tier == "UNKNOWN": continue
         
         h_name = f['teams']['home']['name']
         a_name = f['teams']['away']['name']
@@ -226,13 +245,26 @@ def check_value_bets():
         s_away = get_team_stats(f['teams']['away']['id'], f['league']['id'], f['league']['season'])
         if not s_home or not s_away: continue
         
+        # PRIORITÉ 1: xG AVANCÉ (Home/Away Split)
         try:
-            h_avg = s_home['goals']['for']['total']['total'] / s_home['fixtures']['played']['total']
-            a_avg = s_away['goals']['for']['total']['total'] / s_away['fixtures']['played']['total']
+            # Domicile : Stats à domicile
+            h_goals_home = s_home['goals']['for']['total']['home']
+            h_matches_home = s_home['fixtures']['played']['home']
+            h_xg_home = h_goals_home / h_matches_home if h_matches_home > 0 else 1.0
             
-            home_advantage = 0.15
-            hxg = h_avg + home_advantage
-            axg = a_avg
+            # Extérieur : Stats à l'extérieur
+            a_goals_away = s_away['goals']['for']['total']['away']
+            a_matches_away = s_away['fixtures']['played']['away']
+            a_xg_away = a_goals_away / a_matches_away if a_matches_away > 0 else 1.0
+            
+            # Défense adversaire (simplifié: on prend la moyenne globale pour l'instant)
+            h_conc = s_home['goals']['against']['total']['total'] / s_home['fixtures']['played']['total']
+            a_conc = s_away['goals']['against']['total']['total'] / s_away['fixtures']['played']['total']
+            
+            # Calcul final
+            hxg = h_xg_home * 1.15 # Avantage domicile reste
+            axg = a_xg_away
+            
         except:
             continue
 
@@ -243,7 +275,7 @@ def check_value_bets():
         
         if opps:
             info = {
-                'id': fid, 'league': f['league']['name'], 
+                'id': fid, 'league': lname, 
                 'home': h_name, 'away': a_name
             }
             notify(opps[0], info, hxg, axg)
