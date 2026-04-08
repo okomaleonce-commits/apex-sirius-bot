@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.4 — EXPANDED LEAGUE WHITELIST        ║
+║          APEX-SIRIUS v5.5 — FULL 50-LEAGUE COVERAGE         ║
 ║──────────────────────────────────────────────────────────────║
-║  Fixes vs v5.3 :                                            ║
-║  [F17] URL FootyStats corrigée :                             ║
-║         ❌ https://api.footystats.org/v2                     ║
-║         ✅ https://api.football-data-api.com                 ║
-║  [F18] Endpoint primaire : /todays-matches                   ║
-║         → xG (team_a_xg_avg / team_b_xg_avg) dans le match  ║
-║         → Plus besoin de double appel search + team          ║
-║  [F19] Matching cross-API par nom normalisé (fuzzy 85%)      ║
-║  [F20] DCS réellement variable :                             ║
-║         footystats → DCS 0.76–1.00                          ║
-║         goals_proxy → DCS 0.40–0.68 (malus 20%)            ║
-║  [F21] Pre-fetch FootyStats une seule fois par cycle         ║
-║         (économie d'appels API, pas 1 appel par match)       ║
-║  [F22] Whitelist FootyStats league_id mappée aux tiers       ║
-║  [F23] Fallback gracieux si FootyStats hors ligne            ║
+║  Contexte : Les 50 ligues de la whitelist sont activées      ║
+║  dans le forfait FootyStats de l'utilisateur.                ║
+║  FootyStats /todays-matches retourne donc des données xG     ║
+║  réelles pour TOUTES les ligues.                             ║
+║                                                              ║
+║  Nouveautés vs v5.4 :                                        ║
+║  [F24] MODE DUAL selon disponibilité des cotes :             ║
+║         Mode A — BET  : odds bookmaker disponibles           ║
+║                  → Edge = P(model) - 1/odd                   ║
+║                  → Kelly stake calculé                        ║
+║                  → Alert complète avec cote et mise           ║
+║         Mode B — SIGNAL : pas de cotes bookmaker             ║
+║                  → Probabilité via /predictions API-Football  ║
+║                  → Seuil de confiance P > 55%                ║
+║                  → Alert "SIGNAL" sans mise Kelly             ║
+║  [F25] FootyStats source primaire UNIQUE pour les matchs     ║
+║         Les 50 ligues du forfait remontent dans              ║
+║         /todays-matches avec xG réel inclus.                 ║
+║         Football API = source secondaire (odds + stats).     ║
+║  [F26] DCS recalibré : footystats = source garantie          ║
+║         MIN_DCS unifié à 0.62 (footystats garanti)           ║
+║  [F27] Fixture cross-matching FootyStats → Football API      ║
+║         par nom d'équipe fuzzy pour récupérer le fixture_id  ║
+║         nécessaire aux endpoints /odds et /predictions        ║
+║  [F28] Alerte SIGNAL distincte visuellement (📡 vs 🎯)       ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -41,14 +51,14 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.4 — EXPANDED LEAGUE WHITELIST")
+log.info("🚀 APEX-SIRIUS v5.5 — FULL 50-LEAGUE COVERAGE")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 APEX-SIRIUS v5.3 Running", 200
+    return "APEX-SIRIUS v5.5 Running", 200
 
 @app.route('/ping')
 def ping():
@@ -61,12 +71,11 @@ API_KEY        = os.environ.get("API_KEY")
 FOOTYSTATS_KEY = os.environ.get("FOOTYSTATS_KEY")
 DATA_DIR       = os.environ.get("DATA_DIR", "/tmp")
 
-# [F1] CHAT_ID casté en int
 try:
     CHAT_ID = int(CHAT_ID_RAW) if CHAT_ID_RAW else None
 except ValueError:
     CHAT_ID = None
-    log.error("❌ CHAT_ID invalide : doit être un entier")
+    log.error("CHAT_ID invalide")
 
 bot = None
 _missing = [k for k, v in {
@@ -75,44 +84,34 @@ _missing = [k for k, v in {
 }.items() if not v]
 
 if _missing:
-    log.error(f"❌ Variables manquantes : {', '.join(_missing)}")
+    log.error(f"Variables manquantes : {', '.join(_missing)}")
 else:
     try:
         bot = telebot.TeleBot(BOT_TOKEN)
-        log.info("✅ Telegram Bot initialisé")
+        log.info("Telegram Bot initialise")
     except Exception as e:
-        log.error(f"❌ Erreur init Telegram : {e}")
+        log.error(f"Erreur init Telegram : {e}")
 
-# ── API-Sports (Football API) ─────────────────────────────────
 BASE_URL = "https://v3.football.api-sports.io"
 HEADERS  = {"x-apisports-key": API_KEY} if API_KEY else {}
-
-# ── [F17] FootyStats — URL CORRIGÉE ──────────────────────────
 FS_BASE  = "https://api.football-data-api.com"
 
-# ====================== GATE-0 : WHITELIST ======================
-# API-Sports league_id → (tier, nom lisible)
+# ====================== GATE-0 : WHITELIST 50 LIGUES ======================
+# [F25] Les 50 ligues correspondent exactement au forfait FootyStats.
+# Football API league_id → (tier, nom lisible)
 LEAGUE_WHITELIST = {
-    # ══════════════════════════════════════════════
-    # P0 — Compétitions UEFA / AFC continentales
-    # ══════════════════════════════════════════════
+    # P0 — UEFA / AFC
     2:   ("P0", "UEFA Champions League"),
     3:   ("P0", "UEFA Europa League"),
     848: ("P0", "UEFA Europa Conference League"),
     17:  ("P0", "AFC Champions League"),
-
-    # ══════════════════════════════════════════════
-    # N1 — Top 5 Européens
-    # ══════════════════════════════════════════════
+    # N1 — Top 5
     39:  ("N1", "Premier League"),
     140: ("N1", "La Liga"),
     78:  ("N1", "Bundesliga"),
     135: ("N1", "Serie A"),
     61:  ("N1", "Ligue 1"),
-
-    # ══════════════════════════════════════════════
-    # N2 — Ligues fortes Europe + Grandes Amériques/Asie
-    # ══════════════════════════════════════════════
+    # N2 — Ligues fortes
     40:  ("N2", "Championship"),
     62:  ("N2", "Ligue 2"),
     79:  ("N2", "2. Bundesliga"),
@@ -120,31 +119,28 @@ LEAGUE_WHITELIST = {
     88:  ("N2", "Eredivisie"),
     144: ("N2", "Pro League Belgique"),
     94:  ("N2", "Primeira Liga"),
-    203: ("N2", "Süper Lig"),
+    203: ("N2", "Super Lig"),
     179: ("N2", "Scottish Premiership"),
     235: ("N2", "Russian Premier League"),
-    71:  ("N2", "Série A Brésil"),
-    128: ("N2", "Primera División Argentine"),
+    71:  ("N2", "Serie A Bresil"),
+    128: ("N2", "Primera Division Argentine"),
     262: ("N2", "Liga MX"),
     253: ("N2", "MLS"),
     98:  ("N2", "J1 League"),
     292: ("N2", "K League 1"),
     307: ("N2", "Saudi Professional League"),
     188: ("N2", "A-League Australie"),
-
-    # ══════════════════════════════════════════════
-    # N3 — Ligues surveillées
-    # ══════════════════════════════════════════════
+    # N3 — Ligues surveillees
     41:  ("N3", "EFL League One"),
     89:  ("N3", "Eerste Divisie"),
     113: ("N3", "Allsvenskan"),
     119: ("N3", "Superliga Danemark"),
-    103: ("N3", "Eliteserien Norvège"),
+    103: ("N3", "Eliteserien Norvege"),
     106: ("N3", "Ekstraklasa Pologne"),
     95:  ("N3", "LigaPro Portugal"),
     218: ("N3", "Bundesliga Autriche"),
     207: ("N3", "Super League Suisse"),
-    197: ("N3", "Super League Grèce"),
+    197: ("N3", "Super League Grece"),
     283: ("N3", "Liga I Roumanie"),
     271: ("N3", "NB I Hongrie"),
     210: ("N3", "Prva HNL Croatie"),
@@ -153,80 +149,40 @@ LEAGUE_WHITELIST = {
     169: ("N3", "Chinese Super League"),
     200: ("N3", "Botola Pro Maroc"),
     233: ("N3", "Egyptian Premier League"),
-    265: ("N3", "Primera División Chili"),
+    265: ("N3", "Primera Division Chili"),
     239: ("N3", "Categoria Primera A Colombie"),
     244: ("N3", "Veikkausliiga Finlande"),
-    164: ("N3", "Úrvalsdeild Islande"),
+    164: ("N3", "Urvalsdeild Islande"),
     384: ("N3", "Ivory Coast Ligue 1"),
 }
 
-def get_league_info(league_id: int) ->object:
+def get_league_info(league_id):
     return LEAGUE_WHITELIST.get(league_id)
 
-# ====================== GATE-1 : DCS ======================
-# [F20] Seuils différenciés selon la source xG
-MIN_DCS_FS    = 0.65   # FootyStats confirmé
-MIN_DCS_PROXY = 0.60   # Goals proxy (bar abaissé car données moins fiables)
+# Tiers qui ont généralement des cotes bookmakers disponibles
+TIERS_WITH_ODDS = {"P0", "N1", "N2"}
 
-def calculate_dcs(stats_h: dict, stats_a: dict,
-                  hxg_source: str, axg_source: str) -> float:
-    """
-    DCS [0.0 – 1.0]
-    ─ Matchs joués (max 0.40)
-    ─ Qualité source xG (max 0.40)
-    ─ Complétude stats goals (max 0.20)
-    [F20] Malus 20% si double proxy
-    """
-    score = 0.0
+# ====================== SEUILS ======================
+MIN_DCS       = 0.62   # [F26] Unifié — footystats garanti sur 50 ligues
+MIN_EDGE      = 0.05   # Mode A (BET)
+MIN_CONF      = 25     # Mode A + B
+MIN_SIGNAL_P  = 0.55   # Mode B (SIGNAL) — probabilité minimum FootyStats
 
-    # Matchs joués
-    try:
-        h_p = stats_h['fixtures']['played']['total']
-        a_p = stats_a['fixtures']['played']['total']
-        mp  = min(h_p, a_p)
-        if mp >= 10:   score += 0.40
-        elif mp >= 6:  score += 0.25
-        elif mp >= 3:  score += 0.10
-    except (KeyError, TypeError):
-        pass
-
-    # Qualité source xG — [F20] valeurs corrigées
-    score += 0.20 if hxg_source == "footystats" else 0.08
-    score += 0.20 if axg_source == "footystats" else 0.08
-
-    # Complétude goals stats
-    try:
-        _ = stats_h['goals']['for']['total']['total']
-        _ = stats_a['goals']['for']['total']['total']
-        score += 0.20
-    except (KeyError, TypeError):
-        pass
-
-    # [F20] Malus 20% si les deux sources sont proxy
-    if hxg_source == "goals_proxy" and axg_source == "goals_proxy":
-        score *= 0.80
-
-    return min(round(score, 3), 1.0)
-
-# ====================== GATE-2 : VALUE ======================
-MIN_EDGE = 0.05
-MIN_CONF = 25
-
-# ====================== EXCLUSION FILTER ======================
+# ====================== EXCLUSION ======================
 EXCLUSION_KEYWORDS = [
-    "women", " w ", " w)", "feminin", "femenino", "féminin",
-    "feminine", "girl", "fem ", "u19", "u21", "u23", "u18",
-    "u17", "u16", "u15", "reserves", "reserve", "b team",
-    " ii ", " ii)", " iii", "youth", "sub-23", "sub23",
-    "amateur", "futsal", "indoor", "beach",
+    "women", " w ", " w)", "feminin", "femenino", "feminine",
+    "girl", "fem ", "u19", "u21", "u23", "u18", "u17", "u16",
+    "u15", "reserves", "reserve", "b team", " ii ", " ii)",
+    " iii", "youth", "sub-23", "sub23", "amateur", "futsal",
+    "indoor", "beach",
 ]
 
-def is_excluded(name: str) -> bool:
+def is_excluded(name):
     n = name.lower()
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
-# ====================== PERSISTENT STORAGE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v53.db")
+# ====================== SQLITE ======================
+DB_PATH = os.path.join(DATA_DIR, "apex_v55.db")
 
 def init_db():
     try:
@@ -242,14 +198,14 @@ def init_db():
                 away       TEXT,
                 league_id  INTEGER,
                 tier       TEXT,
+                mode       TEXT,
                 side       TEXT,
                 odd        REAL,
                 edge       REAL,
                 bookie     TEXT,
+                prob       REAL,
                 hxg        REAL,
                 axg        REAL,
-                hxg_source TEXT,
-                axg_source TEXT,
                 dcs        REAL,
                 conf       INTEGER,
                 stake      REAL,
@@ -266,76 +222,71 @@ def init_db():
         c.execute("INSERT OR IGNORE INTO bankroll (id, amount) VALUES (1, 100.0)")
         conn.commit()
         conn.close()
-        log.info(f"✅ DB initialisée : {DB_PATH}")
+        log.info(f"DB : {DB_PATH}")
     except Exception as e:
-        log.error(f"❌ init_db : {e}")
+        log.error(f"init_db : {e}")
 
-def get_bankroll() -> float:
+def get_bankroll():
     try:
         conn = sqlite3.connect(DB_PATH)
         row  = conn.execute("SELECT amount FROM bankroll WHERE id=1").fetchone()
         conn.close()
         return row[0] if row else 100.0
     except Exception as e:
-        log.warning(f"⚠️ get_bankroll : {e}")
+        log.warning(f"get_bankroll : {e}")
         return 100.0
 
-def log_bet_db(data: dict):
+def log_bet_db(data):
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("""
             INSERT INTO bets
-              (ts, fixture_id, home, away, league_id, tier, side, odd,
-               edge, bookie, hxg, axg, hxg_source, axg_source, dcs, conf, stake)
+              (ts, fixture_id, home, away, league_id, tier, mode, side,
+               odd, edge, bookie, prob, hxg, axg, dcs, conf, stake)
             VALUES
-              (:ts, :fixture_id, :home, :away, :league_id, :tier, :side, :odd,
-               :edge, :bookie, :hxg, :axg, :hxg_source, :axg_source, :dcs, :conf, :stake)
+              (:ts, :fixture_id, :home, :away, :league_id, :tier, :mode,
+               :side, :odd, :edge, :bookie, :prob, :hxg, :axg, :dcs,
+               :conf, :stake)
         """, data)
         conn.commit()
         conn.close()
     except Exception as e:
-        log.warning(f"⚠️ log_bet_db : {e}")
+        log.warning(f"log_bet_db : {e}")
 
-# ====================== [F18] FOOTYSTATS BRIDGE CORRIGÉ ======================
-# [F19] Matching par nom normalisé
-def normalize_name(name: str) -> str:
-    """Normalise un nom d'équipe pour le matching cross-API."""
+# ====================== [F25] FOOTYSTATS — SOURCE PRIMAIRE ======================
+# FootyStats /todays-matches retourne les matchs de toutes les 50 ligues
+# activées dans le forfait avec xG inclus dans chaque match.
+_fs_matches   = []
+_fs_match_ts  = 0.0
+FS_TTL        = 25 * 60  # 25 min
+
+def normalize(name):
     n = name.lower().strip()
-    for rm in ["fc", "cf", "sc", "ac", "afc", "fk", "sk",
-               "sv", "bv", "vv", "if", "rcd", "rc", "sd", "ud"]:
+    for rm in ["fc", "cf", "sc", "ac", "afc", "fk", "sk", "sv",
+               "bv", "vv", "if", "rcd", "rc", "sd", "ud", "as"]:
         n = n.replace(f" {rm}", "").replace(f"{rm} ", "")
     return n.strip()
 
-def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.82) -> bool:
-    """Retourne True si les deux noms sont similaires à ≥ threshold."""
-    na = normalize_name(name_a)
-    nb = normalize_name(name_b)
+def fuzzy(a, b, threshold=0.80):
+    na, nb = normalize(a), normalize(b)
     if na == nb:
         return True
-    ratio = SequenceMatcher(None, na, nb).ratio()
-    return ratio >= threshold
+    return SequenceMatcher(None, na, nb).ratio() >= threshold
 
-# Index FootyStats pour le cycle courant : {normalized_name: match_dict}
-_fs_index = {}
-_fs_index_ts = 0.0
-FS_INDEX_TTL = 30 * 60   # Rafraîchi toutes les 30 min
-
-def build_fs_index() ->dict:
+def fetch_fs_todays_matches():
     """
-    [F18] Appel UNIQUE à /todays-matches par cycle.
-    Retourne un index {nom_normalisé: match_fs_object}.
-    Chaque match FootyStats contient directement :
-      team_a_xg_avg → xG moyen équipe domicile
-      team_b_xg_avg → xG moyen équipe extérieur
+    [F25] Appel unique à FootyStats /todays-matches par cycle.
+    Retourne la liste brute de tous les matchs du jour.
+    Chaque match contient team_a_xg_avg et team_b_xg_avg.
     """
-    global _fs_index, _fs_index_ts
+    global _fs_matches, _fs_match_ts
 
     now = time.time()
-    if now - _fs_index_ts < FS_INDEX_TTL and _fs_index:
-        return _fs_index
+    if now - _fs_match_ts < FS_TTL and _fs_matches:
+        return _fs_matches
 
     if not FOOTYSTATS_KEY:
-        return {}
+        return []
 
     try:
         r = requests.get(
@@ -344,87 +295,102 @@ def build_fs_index() ->dict:
             timeout=15
         )
         if r.status_code != 200:
-            log.warning(f"⚠️ FootyStats /todays-matches → HTTP {r.status_code}")
-            return _fs_index   # Retourne l'ancien cache
+            log.warning(f"FootyStats /todays-matches HTTP {r.status_code}")
+            return _fs_matches
 
-        raw  = r.json()
-        data = raw.get("data", [])
-        if not data:
-            log.info("ℹ️ FootyStats : 0 matchs aujourd'hui")
-            return {}
-
-        index = {}
-        for m in data:
-            h = m.get("home_name", "")
-            a = m.get("away_name", "")
-            if h:
-                index[normalize_name(h)] = m
-            if a:
-                index[normalize_name(a)] = m
-
-        _fs_index    = index
-        _fs_index_ts = now
-        log.info(f"✅ FootyStats index : {len(data)} matchs / {len(index)} équipes")
-        return _fs_index
+        data = r.json().get("data", [])
+        _fs_matches  = data
+        _fs_match_ts = now
+        log.info(f"FootyStats : {len(data)} matchs charges")
+        return _fs_matches
 
     except Exception as e:
-        log.warning(f"⚠️ build_fs_index : {e}")
-        return _fs_index   # Cache précédent
+        log.warning(f"fetch_fs_todays_matches : {e}")
+        return _fs_matches
 
-def get_fs_xg_from_index(team_name: str,
-                          fs_index: dict,
-                          is_home: bool) ->object:
+def find_fs_match(h_name, a_name, fs_matches):
     """
-    [F19] Cherche team_name dans l'index FootyStats par fuzzy match.
-    Retourne team_a_xg_avg (home) ou team_b_xg_avg (away).
+    [F27] Trouve le match FootyStats correspondant à une paire d'équipes.
+    Retourne le dict match ou None.
     """
-    norm = normalize_name(team_name)
-
-    # Recherche exacte d'abord
-    if norm in fs_index:
-        m = fs_index[norm]
-        field = "team_a_xg_avg" if is_home else "team_b_xg_avg"
-        val   = m.get(field)
-        if val is not None and float(val) > 0:
-            return float(val)
-
-    # Recherche fuzzy
-    for key, m in fs_index.items():
-        if fuzzy_match(norm, key):
-            # Vérifier que c'est bien la bonne équipe (home ou away)
-            h = normalize_name(m.get("home_name", ""))
-            a = normalize_name(m.get("away_name", ""))
-            if is_home and fuzzy_match(norm, h):
-                val = m.get("team_a_xg_avg")
-            elif not is_home and fuzzy_match(norm, a):
-                val = m.get("team_b_xg_avg")
-            else:
-                continue
-            if val is not None and float(val) > 0:
-                return float(val)
-
+    for m in fs_matches:
+        mh = m.get("home_name", "")
+        ma = m.get("away_name", "")
+        if fuzzy(h_name, mh) and fuzzy(a_name, ma):
+            return m
     return None
+
+def get_xg_from_fs_match(fs_match, is_home):
+    """
+    Extrait xG depuis un match FootyStats.
+    team_a_xg_avg = domicile, team_b_xg_avg = extérieur.
+    """
+    if not fs_match:
+        return None
+    field = "team_a_xg_avg" if is_home else "team_b_xg_avg"
+    val   = fs_match.get(field)
+    if val is not None:
+        try:
+            v = float(val)
+            return v if v > 0 else None
+        except (ValueError, TypeError):
+            pass
+    return None
+
+# ====================== GATE-1 : DCS ======================
+def calculate_dcs(stats_h, stats_a, hxg_source, axg_source):
+    """
+    [F26] DCS recalibré.
+    Avec FootyStats activé sur 50 ligues, hxg_source sera
+    quasi-systématiquement 'footystats'. Le DCS sera donc
+    naturellement dans la plage haute (0.76 - 1.00).
+    """
+    score = 0.0
+
+    try:
+        h_p = stats_h['fixtures']['played']['total']
+        a_p = stats_a['fixtures']['played']['total']
+        mp  = min(h_p, a_p)
+        if mp >= 10:   score += 0.40
+        elif mp >= 6:  score += 0.25
+        elif mp >= 3:  score += 0.10
+    except (KeyError, TypeError):
+        pass
+
+    score += 0.20 if hxg_source == "footystats" else 0.08
+    score += 0.20 if axg_source == "footystats" else 0.08
+
+    try:
+        _ = stats_h['goals']['for']['total']['total']
+        _ = stats_a['goals']['for']['total']['total']
+        score += 0.20
+    except (KeyError, TypeError):
+        pass
+
+    if hxg_source == "goals_proxy" and axg_source == "goals_proxy":
+        score *= 0.80
+
+    return min(round(score, 3), 1.0)
 
 # ====================== MATH : DIXON-COLES ======================
 DC_RHO = -0.13
 
-def poisson_prob(lmb: float, k: int) -> float:
+def poisson_prob(lmb, k):
     try:
         if lmb <= 0:
             return 1.0 if k == 0 else 0.0
         return (math.exp(-lmb) * (lmb ** k)) / math.factorial(k)
-    except Exception as e:
-        log.debug(f"poisson_prob : {e}")
+    except Exception:
         return 0.0
 
-def tau(x: int, y: int, lmb: float, mu: float, rho: float) -> float:
+def tau(x, y, lmb, mu, rho):
     if x == 0 and y == 0:   return 1.0 - lmb * mu * rho
     elif x == 1 and y == 0: return 1.0 + mu * rho
     elif x == 0 and y == 1: return 1.0 + lmb * rho
     elif x == 1 and y == 1: return 1.0 - rho
     return 1.0
 
-def calculate_probs(hxg: float, axg: float) ->dict:
+def calculate_probs(hxg, axg):
     probs = {"H": 0.0, "D": 0.0, "A": 0.0}
     hp = [poisson_prob(hxg, i) for i in range(7)]
     ap = [poisson_prob(axg, i) for i in range(7)]
@@ -440,51 +406,37 @@ def calculate_probs(hxg: float, axg: float) ->dict:
         probs = {k: v / total for k, v in probs.items()}
     return probs
 
-# ====================== ML CONFIDENCE SCORE ======================
-def calculate_confidence(hxg: float, axg: float,
-                          tier: str, edge: float, dcs: float) -> int:
-    """Score ML /50 sur 4 composantes."""
+# ====================== ML CONFIDENCE ======================
+def calculate_confidence(hxg, axg, tier, edge, dcs):
     score = 0
     diff  = abs(hxg - axg)
-
-    # Différentiel xG (max 20)
     if diff > 1.5:    score += 20
     elif diff > 0.8:  score += 12
     elif diff > 0.4:  score += 6
-
-    # Tier compétition (max 12)
     score += {"P0": 12, "N1": 10, "N2": 6, "N3": 3}.get(tier, 0)
-
-    # Force de l'edge (max 10)
     if edge > 0.15:   score += 10
     elif edge > 0.10: score += 7
     elif edge > 0.05: score += 4
-
-    # DCS (max 8)
     if dcs >= 0.80:   score += 8
     elif dcs >= 0.65: score += 5
-    elif dcs >= 0.60: score += 2
-
+    elif dcs >= 0.62: score += 2
     return min(score, 50)
 
-# ====================== KELLY STAKING ======================
+# ====================== KELLY ======================
 KELLY_FRACTION = 0.25
 MAX_STAKE_PCT  = 0.05
 
-def kelly_stake(prob: float, odd: float, bankroll: float) -> float:
+def kelly_stake(prob, odd, bankroll):
     b = odd - 1.0
     q = 1.0 - prob
     k = (b * prob - q) / b if b > 0 else 0.0
     if k <= 0:
         return 0.0
-    raw    = bankroll * KELLY_FRACTION * k
-    capped = min(raw, bankroll * MAX_STAKE_PCT)
-    return round(capped, 2)
+    return round(min(bankroll * KELLY_FRACTION * k,
+                     bankroll * MAX_STAKE_PCT), 2)
 
-# ====================== VALUE ENGINE ======================
-def detect_best_value(probs: dict, odds_data: list,
-                       hxg: float, axg: float,
-                       tier: str, dcs: float) ->object:
+# ====================== MODE A : VALUE ENGINE (avec cotes) ======================
+def detect_best_value(probs, odds_data, hxg, axg, tier, dcs):
     best     = None
     max_edge = 0.0
 
@@ -500,14 +452,11 @@ def detect_best_value(probs: dict, odds_data: list,
                         odd  = float(v['odd'])
                     except (KeyError, ValueError):
                         continue
-
                     if odd < 1.50:
                         continue
-
                     key        = "H" if side == "Home" else "D" if side == "Draw" else "A"
                     prob_model = probs.get(key, 0.0)
                     edge       = prob_model - (1.0 / odd)
-
                     if edge < MIN_EDGE:
                         continue
                     if key == "D" and edge < 0.08:
@@ -516,53 +465,116 @@ def detect_best_value(probs: dict, odds_data: list,
                         continue
                     if key == "H" and prob_model < 0.35 and odd < 1.60:
                         continue
-
                     conf = calculate_confidence(hxg, axg, tier, edge, dcs)
                     if conf < MIN_CONF:
                         continue
-
                     if edge > max_edge:
                         max_edge = edge
                         best = {
                             "side": side, "key": key, "odd": odd,
                             "edge": edge, "bookie": bn,
-                            "conf": conf, "prob": prob_model
+                            "conf": conf, "prob": prob_model,
+                            "mode": "BET"
                         }
     return best
 
-# ====================== API-SPORTS WRAPPERS ======================
-def safe_get(url: str, params=None) ->object:
+# ====================== [F24] MODE B : SIGNAL ENGINE (sans cotes) ======================
+def detect_signal(probs, predictions, hxg, axg, tier, dcs):
+    """
+    Mode B : pas de cotes bookmaker.
+    Utilise les probabilités de notre modèle Poisson + validation
+    par /predictions API-Football si disponible.
+    Retourne un signal si P(outcome) > MIN_SIGNAL_P.
+    """
+    best      = None
+    best_prob = MIN_SIGNAL_P
+
+    side_map = {"H": "Home", "D": "Draw", "A": "Away"}
+
+    # Probabilités API-Football /predictions (validation externe)
+    api_probs = {}
+    if predictions:
+        try:
+            pw = predictions.get('predictions', {}).get('percent', {})
+            api_probs = {
+                "H": float(pw.get('home', '0').replace('%', '')) / 100,
+                "D": float(pw.get('draws', '0').replace('%', '')) / 100,
+                "A": float(pw.get('away', '0').replace('%', '')) / 100,
+            }
+        except Exception as e:
+            log.debug(f"predictions parse : {e}")
+
+    for key in ["H", "A", "D"]:
+        pm = probs.get(key, 0.0)
+
+        # Draw : bar plus élevé (trop volatile sans cotes)
+        if key == "D":
+            continue
+
+        # Validation croisée avec API predictions si disponible
+        if api_probs:
+            pa = api_probs.get(key, 0.0)
+            # Les deux modèles doivent être d'accord (même outcome favori)
+            if pa < MIN_SIGNAL_P * 0.85:
+                continue
+
+        if pm > best_prob:
+            # Pseudo-edge basé sur la force du signal
+            pseudo_edge = pm - (1.0 - pm) * 0.5
+            conf = calculate_confidence(hxg, axg, tier,
+                                        max(pseudo_edge, 0.05), dcs)
+            if conf < MIN_CONF:
+                continue
+            best_prob = pm
+            best = {
+                "side": side_map[key], "key": key, "odd": None,
+                "edge": None, "bookie": None,
+                "conf": conf, "prob": pm,
+                "mode": "SIGNAL"
+            }
+
+    return best
+
+# ====================== API-SPORTS ======================
+def safe_get(url, params=None):
     try:
         r = requests.get(url, headers=HEADERS, params=params, timeout=10)
         if r.status_code == 200:
             return r.json()
-        log.debug(f"safe_get {url} → HTTP {r.status_code}")
+        log.debug(f"safe_get HTTP {r.status_code} : {url}")
         return None
     except Exception as e:
-        log.warning(f"⚠️ safe_get : {e}")
+        log.warning(f"safe_get : {e}")
         return None
 
-def get_fixtures() -> list:
-    d = safe_get(f"{BASE_URL}/fixtures", {"date": time.strftime('%Y-%m-%d')})
+def get_fixtures():
+    d = safe_get(f"{BASE_URL}/fixtures",
+                 {"date": time.strftime('%Y-%m-%d')})
     return d.get('response', []) if d else []
 
-def get_odds(fid: int) -> list:
+def get_odds(fid):
     d = safe_get(f"{BASE_URL}/odds", {"fixture": fid})
     return d.get('response', []) if d else []
 
-def get_stats(tid: int, lid: int, season: int) ->object:
+def get_stats(tid, lid, season):
     d = safe_get(f"{BASE_URL}/teams/statistics",
                  {"team": tid, "league": lid, "season": season})
     return d.get('response') if d else None
 
+def get_predictions(fid):
+    """[F24] Mode B — probabilités Football API."""
+    d = safe_get(f"{BASE_URL}/predictions", {"fixture": fid})
+    resp = d.get('response', []) if d else []
+    return resp[0] if resp else None
+
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"⏰ v5.4 — Cycle {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.5 — {datetime.now().strftime('%H:%M')}")
 
-    # [F21] Pre-fetch FootyStats UNE SEULE FOIS pour tout le cycle
-    fs_index = build_fs_index()
-    fs_ok    = len(fs_index) > 0
-    log.info(f"  FootyStats index : {'✅ actif' if fs_ok else '⚠️ hors ligne → fallback proxy'}")
+    # [F25] Pre-fetch FootyStats UNE SEULE FOIS
+    fs_matches = fetch_fs_todays_matches()
+    fs_ok      = len(fs_matches) > 0
+    log.info(f"FootyStats : {'actif — ' + str(len(fs_matches)) + ' matchs' if fs_ok else 'hors ligne'}")
 
     fixtures = get_fixtures()
     now      = datetime.now(timezone.utc)
@@ -573,13 +585,13 @@ def check_loop():
         try:
             league_id = f['league']['id']
 
-            # ── GATE-0 ────────────────────────────────────────────
+            # GATE-0
             league_info = get_league_info(league_id)
-            if league_info is None:
+            if not league_info:
                 continue
             tier, league_name = league_info
 
-            # ── Fenêtre temporelle ────────────────────────────────
+            # Fenetre temporelle
             m_date  = datetime.fromisoformat(
                 f['fixture']['date'].replace('Z', '+00:00'))
             delta_h = (m_date - now).total_seconds() / 3600
@@ -592,24 +604,19 @@ def check_loop():
             if is_excluded(h_name) or is_excluded(a_name):
                 continue
 
-            # ── Stats équipes (API-Sports) ────────────────────────
+            # Stats API-Football
             season  = f['league']['season']
             stats_h = get_stats(f['teams']['home']['id'], league_id, season)
             stats_a = get_stats(f['teams']['away']['id'], league_id, season)
             if not stats_h or not stats_a:
                 continue
 
-            # ── [F18][F19] xG — FootyStats en priorité ────────────
+            # [F27] Cross-match FootyStats → xG réel
             hxg_source = axg_source = "goals_proxy"
+            fs_match   = find_fs_match(h_name, a_name, fs_matches) if fs_ok else None
 
-            if fs_ok:
-                hxg_fs = get_fs_xg_from_index(h_name, fs_index, is_home=True)
-                axg_fs = get_fs_xg_from_index(a_name, fs_index, is_home=False)
-            else:
-                hxg_fs = axg_fs = None
-
-            if hxg_fs:
-                hxg = hxg_fs
+            hxg = get_xg_from_fs_match(fs_match, is_home=True)
+            if hxg:
                 hxg_source = "footystats"
             else:
                 try:
@@ -619,8 +626,8 @@ def check_loop():
                 except (KeyError, TypeError, ZeroDivisionError):
                     hxg = 1.20
 
-            if axg_fs:
-                axg = axg_fs
+            axg = get_xg_from_fs_match(fs_match, is_home=False)
+            if axg:
                 axg_source = "footystats"
             else:
                 try:
@@ -630,94 +637,122 @@ def check_loop():
                 except (KeyError, TypeError, ZeroDivisionError):
                     axg = 1.00
 
-            # Anti-ZeroPoisson guard
             hxg = max(float(hxg), 0.30)
             axg = max(float(axg), 0.30)
 
-            # ── GATE-1 : DCS ──────────────────────────────────────
-            dcs     = calculate_dcs(stats_h, stats_a, hxg_source, axg_source)
-            min_dcs = MIN_DCS_FS if hxg_source == "footystats" else MIN_DCS_PROXY
-
-            if dcs < min_dcs:
-                log.info(f"  ⛔ DCS={dcs:.2f} < {min_dcs} [{h_name} vs {a_name}]")
+            # GATE-1 : DCS
+            dcs = calculate_dcs(stats_h, stats_a, hxg_source, axg_source)
+            if dcs < MIN_DCS:
+                log.info(f"  DCS={dcs:.2f} trop bas [{h_name} vs {a_name}]")
                 continue
 
-            probs     = calculate_probs(hxg, axg)
-            odds_data = get_odds(f['fixture']['id'])
-            if not odds_data:
-                continue
+            probs   = calculate_probs(hxg, axg)
+            fid     = f['fixture']['id']
+            result  = None
 
-            # ── GATE-2 : Value ────────────────────────────────────
-            best = detect_best_value(probs, odds_data, hxg, axg, tier, dcs)
+            # [F24] MODE A — BET (cotes bookmaker)
+            if tier in TIERS_WITH_ODDS:
+                odds_data = get_odds(fid)
+                if odds_data:
+                    result = detect_best_value(
+                        probs, odds_data, hxg, axg, tier, dcs)
 
-            if best and sent < 8:
-                stake = kelly_stake(best['prob'], best['odd'], bank)
+            # [F24] MODE B — SIGNAL (sans cotes, toutes ligues)
+            if result is None:
+                predictions = get_predictions(fid)
+                result = detect_signal(
+                    probs, predictions, hxg, axg, tier, dcs)
 
-                if bot and CHAT_ID:
-                    # Icône source xG
-                    src_icon_h = "🟢" if hxg_source == "footystats" else "🟡"
-                    src_icon_a = "🟢" if axg_source == "footystats" else "🟡"
+            if result and sent < 10:
+                mode  = result['mode']
+                stake = kelly_stake(result['prob'],
+                                    result['odd'] or 0, bank) if mode == "BET" else 0.0
 
+                src_h = "🟢" if hxg_source == "footystats" else "🟡"
+                src_a = "🟢" if axg_source == "footystats" else "🟡"
+
+                if mode == "BET":
+                    # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.3\n"
+                        f"🚀 APEX-SIRIUS v5.5 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🎯 Paris : {best['side']} @ {best['odd']:.2f}\n"
-                        f"📚 Bookmaker : {best['bookie']}\n"
+                        f"🎯 Paris : {result['side']} @ {result['odd']:.2f}\n"
+                        f"📚 Bookmaker : {result['bookie']}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"📊 xG Dom. : {hxg:.2f} {src_icon_h} ({hxg_source})\n"
-                        f"📊 xG Ext. : {axg:.2f} {src_icon_a} ({axg_source})\n"
-                        f"💡 P(modèle) : {best['prob']*100:.1f}%\n"
-                        f"💰 Edge : +{best['edge']*100:.1f}%\n"
-                        f"🧠 ML Score : {best['conf']}/50\n"
+                        f"📊 xG Dom. : {hxg:.2f} {src_h} ({hxg_source})\n"
+                        f"📊 xG Ext. : {axg:.2f} {src_a} ({axg_source})\n"
+                        f"💡 P(modele) : {result['prob']*100:.1f}%\n"
+                        f"💰 Edge : +{result['edge']*100:.1f}%\n"
+                        f"🧠 ML Score : {result['conf']}/50\n"
                         f"🔬 DCS : {dcs:.2f}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏦 Bankroll : {bank:.2f}u\n"
                         f"📌 Mise Kelly : {stake:.2f}u ({stake/bank*100:.1f}%)\n"
-                        f"⏱ Kick-off : {m_date.strftime('%H:%M')} UTC\n"
+                        f"⏱ Kick-off : {m_date.strftime('%H:%M')} UTC"
+                    )
+                else:
+                    # [F28] Alerte SIGNAL — pas de cotes
+                    msg = (
+                        f"📡 APEX-SIRIUS v5.5 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🏆 {league_name} [{tier}]\n"
+                        f"⚽ {h_name} vs {a_name}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📡 Signal : {result['side']}\n"
+                        f"⚠️ Cotes non disponibles via API\n"
+                        f"  → Verifier manuellement\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 xG Dom. : {hxg:.2f} {src_h} ({hxg_source})\n"
+                        f"📊 xG Ext. : {axg:.2f} {src_a} ({axg_source})\n"
+                        f"💡 P(modele) : {result['prob']*100:.1f}%\n"
+                        f"🧠 ML Score : {result['conf']}/50\n"
+                        f"🔬 DCS : {dcs:.2f}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"⏱ Kick-off : {m_date.strftime('%H:%M')} UTC\n"
                         f"🟢 footystats  🟡 proxy"
                     )
+
+                if bot and CHAT_ID:
                     try:
                         bot.send_message(CHAT_ID, msg)
                         log.info(
-                            f"✅ Alert : {best['side']} @ {best['odd']:.2f}"
-                            f" [{league_name}]"
-                            f" xG {hxg_source}/{axg_source}"
-                            f" DCS={dcs:.2f}"
+                            f"[{mode}] {result['side']}"
+                            f" | {league_name} [{tier}]"
+                            f" | xG {hxg_source}/{axg_source}"
+                            f" | DCS={dcs:.2f}"
                         )
                         log_bet_db({
                             "ts":         datetime.now().isoformat(),
-                            "fixture_id": f['fixture']['id'],
+                            "fixture_id": fid,
                             "home":       h_name,
                             "away":       a_name,
                             "league_id":  league_id,
                             "tier":       tier,
-                            "side":       best['side'],
-                            "odd":        best['odd'],
-                            "edge":       best['edge'],
-                            "bookie":     best['bookie'],
+                            "mode":       mode,
+                            "side":       result['side'],
+                            "odd":        result.get('odd') or 0.0,
+                            "edge":       result.get('edge') or 0.0,
+                            "bookie":     result.get('bookie') or "",
+                            "prob":       result['prob'],
                             "hxg":        hxg,
                             "axg":        axg,
-                            "hxg_source": hxg_source,
-                            "axg_source": axg_source,
                             "dcs":        dcs,
-                            "conf":       best['conf'],
+                            "conf":       result['conf'],
                             "stake":      stake,
                         })
                         sent += 1
                     except Exception as e:
-                        log.error(f"❌ send_message : {e}")
+                        log.error(f"send_message : {e}")
 
         except Exception as e:
             fid = f.get('fixture', {}).get('id', '?')
-            log.warning(f"⚠️ Loop [{fid}] : {e}")
+            log.warning(f"Loop [{fid}] : {e}")
 
     log.info(
-        f"✅ Cycle terminé — {sent} alerte(s)"
-        f" — FootyStats {'actif' if fs_ok else 'hors ligne'}"
+        f"Cycle termine — {sent} alerte(s)"
         f" — Bankroll : {bank:.2f}u"
     )
 
@@ -726,7 +761,7 @@ def safe_check():
     try:
         check_loop()
     except Exception as e:
-        log.error(f"❌ check_loop crash : {e}")
+        log.error(f"check_loop crash : {e}")
 
 def run():
     time.sleep(15)
@@ -736,7 +771,7 @@ def run():
         try:
             schedule.run_pending()
         except Exception as e:
-            log.error(f"❌ Scheduler : {e}")
+            log.error(f"Scheduler : {e}")
         time.sleep(1)
 
 # ====================== ENTRYPOINT ======================
@@ -744,9 +779,9 @@ init_db()
 
 if bot:
     threading.Thread(target=run, daemon=True).start()
-    log.info("✅ Scheduler thread démarré (cycle 15 min)")
+    log.info("Scheduler demarre (cycle 15 min)")
 else:
-    log.warning("⚠️ Bot non initialisé — scheduler non démarré")
+    log.warning("Bot non initialise — scheduler non demarre")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
