@@ -92,7 +92,7 @@ FS_BASE  = "https://api.football-data-api.com"
 
 # ====================== GATE-0 : WHITELIST ======================
 # API-Sports league_id → (tier, nom lisible)
-LEAGUE_WHITELIST: dict[int, tuple[str, str]] = {
+LEAGUE_WHITELIST = {
     2:   ("P0", "UEFA Champions League"),
     3:   ("P0", "UEFA Europa League"),
     848: ("P0", "UEFA Conference League"),
@@ -113,7 +113,7 @@ LEAGUE_WHITELIST: dict[int, tuple[str, str]] = {
     253: ("N3", "Saudi Pro League"),
 }
 
-def get_league_info(league_id: int) -> tuple[str, str] | None:
+def get_league_info(league_id: int) ->object:
     return LEAGUE_WHITELIST.get(league_id)
 
 # ====================== GATE-1 : DCS ======================
@@ -269,11 +269,11 @@ def fuzzy_match(name_a: str, name_b: str, threshold: float = 0.82) -> bool:
     return ratio >= threshold
 
 # Index FootyStats pour le cycle courant : {normalized_name: match_dict}
-_fs_index: dict[str, dict] = {}
-_fs_index_ts: float = 0.0
+_fs_index = {}
+_fs_index_ts = 0.0
 FS_INDEX_TTL = 30 * 60   # Rafraîchi toutes les 30 min
 
-def build_fs_index() -> dict[str, dict]:
+def build_fs_index() ->dict:
     """
     [F18] Appel UNIQUE à /todays-matches par cycle.
     Retourne un index {nom_normalisé: match_fs_object}.
@@ -326,7 +326,7 @@ def build_fs_index() -> dict[str, dict]:
 
 def get_fs_xg_from_index(team_name: str,
                           fs_index: dict,
-                          is_home: bool) -> float | None:
+                          is_home: bool) ->object:
     """
     [F19] Cherche team_name dans l'index FootyStats par fuzzy match.
     Retourne team_a_xg_avg (home) ou team_b_xg_avg (away).
@@ -377,7 +377,7 @@ def tau(x: int, y: int, lmb: float, mu: float, rho: float) -> float:
     elif x == 1 and y == 1: return 1.0 - rho
     return 1.0
 
-def calculate_probs(hxg: float, axg: float) -> dict[str, float]:
+def calculate_probs(hxg: float, axg: float) ->dict:
     probs = {"H": 0.0, "D": 0.0, "A": 0.0}
     hp = [poisson_prob(hxg, i) for i in range(7)]
     ap = [poisson_prob(axg, i) for i in range(7)]
@@ -437,7 +437,7 @@ def kelly_stake(prob: float, odd: float, bankroll: float) -> float:
 # ====================== VALUE ENGINE ======================
 def detect_best_value(probs: dict, odds_data: list,
                        hxg: float, axg: float,
-                       tier: str, dcs: float) -> dict | None:
+                       tier: str, dcs: float) ->object:
     best     = None
     max_edge = 0.0
 
@@ -484,7 +484,7 @@ def detect_best_value(probs: dict, odds_data: list,
     return best
 
 # ====================== API-SPORTS WRAPPERS ======================
-def safe_get(url: str, params: dict | None = None) -> dict | None:
+def safe_get(url: str, params=None) ->object:
     try:
         r = requests.get(url, headers=HEADERS, params=params, timeout=10)
         if r.status_code == 200:
@@ -503,7 +503,7 @@ def get_odds(fid: int) -> list:
     d = safe_get(f"{BASE_URL}/odds", {"fixture": fid})
     return d.get('response', []) if d else []
 
-def get_stats(tid: int, lid: int, season: int) -> dict | None:
+def get_stats(tid: int, lid: int, season: int) ->object:
     d = safe_get(f"{BASE_URL}/teams/statistics",
                  {"team": tid, "league": lid, "season": season})
     return d.get('response') if d else None
@@ -578,4 +578,129 @@ def check_loop():
             else:
                 try:
                     a_p = stats_a['fixtures']['played']['total']
-                
+                    a_g = stats_a['goals']['for']['total']['total']
+                    axg = (a_g / a_p) if a_p > 0 else 1.00
+                except (KeyError, TypeError, ZeroDivisionError):
+                    axg = 1.00
+
+            # Anti-ZeroPoisson guard
+            hxg = max(float(hxg), 0.30)
+            axg = max(float(axg), 0.30)
+
+            # ── GATE-1 : DCS ──────────────────────────────────────
+            dcs     = calculate_dcs(stats_h, stats_a, hxg_source, axg_source)
+            min_dcs = MIN_DCS_FS if hxg_source == "footystats" else MIN_DCS_PROXY
+
+            if dcs < min_dcs:
+                log.info(f"  ⛔ DCS={dcs:.2f} < {min_dcs} [{h_name} vs {a_name}]")
+                continue
+
+            probs     = calculate_probs(hxg, axg)
+            odds_data = get_odds(f['fixture']['id'])
+            if not odds_data:
+                continue
+
+            # ── GATE-2 : Value ────────────────────────────────────
+            best = detect_best_value(probs, odds_data, hxg, axg, tier, dcs)
+
+            if best and sent < 8:
+                stake = kelly_stake(best['prob'], best['odd'], bank)
+
+                if bot and CHAT_ID:
+                    # Icône source xG
+                    src_icon_h = "🟢" if hxg_source == "footystats" else "🟡"
+                    src_icon_a = "🟢" if axg_source == "footystats" else "🟡"
+
+                    msg = (
+                        f"🚀 APEX-SIRIUS v5.3\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🏆 {league_name} [{tier}]\n"
+                        f"⚽ {h_name} vs {a_name}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🎯 Paris : {best['side']} @ {best['odd']:.2f}\n"
+                        f"📚 Bookmaker : {best['bookie']}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 xG Dom. : {hxg:.2f} {src_icon_h} ({hxg_source})\n"
+                        f"📊 xG Ext. : {axg:.2f} {src_icon_a} ({axg_source})\n"
+                        f"💡 P(modèle) : {best['prob']*100:.1f}%\n"
+                        f"💰 Edge : +{best['edge']*100:.1f}%\n"
+                        f"🧠 ML Score : {best['conf']}/50\n"
+                        f"🔬 DCS : {dcs:.2f}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🏦 Bankroll : {bank:.2f}u\n"
+                        f"📌 Mise Kelly : {stake:.2f}u ({stake/bank*100:.1f}%)\n"
+                        f"⏱ Kick-off : {m_date.strftime('%H:%M')} UTC\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🟢 footystats  🟡 proxy"
+                    )
+                    try:
+                        bot.send_message(CHAT_ID, msg)
+                        log.info(
+                            f"✅ Alert : {best['side']} @ {best['odd']:.2f}"
+                            f" [{league_name}]"
+                            f" xG {hxg_source}/{axg_source}"
+                            f" DCS={dcs:.2f}"
+                        )
+                        log_bet_db({
+                            "ts":         datetime.now().isoformat(),
+                            "fixture_id": f['fixture']['id'],
+                            "home":       h_name,
+                            "away":       a_name,
+                            "league_id":  league_id,
+                            "tier":       tier,
+                            "side":       best['side'],
+                            "odd":        best['odd'],
+                            "edge":       best['edge'],
+                            "bookie":     best['bookie'],
+                            "hxg":        hxg,
+                            "axg":        axg,
+                            "hxg_source": hxg_source,
+                            "axg_source": axg_source,
+                            "dcs":        dcs,
+                            "conf":       best['conf'],
+                            "stake":      stake,
+                        })
+                        sent += 1
+                    except Exception as e:
+                        log.error(f"❌ send_message : {e}")
+
+        except Exception as e:
+            fid = f.get('fixture', {}).get('id', '?')
+            log.warning(f"⚠️ Loop [{fid}] : {e}")
+
+    log.info(
+        f"✅ Cycle terminé — {sent} alerte(s)"
+        f" — FootyStats {'actif' if fs_ok else 'hors ligne'}"
+        f" — Bankroll : {bank:.2f}u"
+    )
+
+# ====================== SCHEDULER ======================
+def safe_check():
+    try:
+        check_loop()
+    except Exception as e:
+        log.error(f"❌ check_loop crash : {e}")
+
+def run():
+    time.sleep(15)
+    safe_check()
+    schedule.every(15).minutes.do(safe_check)
+    while True:
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            log.error(f"❌ Scheduler : {e}")
+        time.sleep(1)
+
+# ====================== ENTRYPOINT ======================
+init_db()
+
+if bot:
+    threading.Thread(target=run, daemon=True).start()
+    log.info("✅ Scheduler thread démarré (cycle 15 min)")
+else:
+    log.warning("⚠️ Bot non initialisé — scheduler non démarré")
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
