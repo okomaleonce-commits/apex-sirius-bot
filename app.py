@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.3 — FOOTYSTATS FIXED EDITION        ║
+║          APEX-SIRIUS v5.4 — EXPANDED LEAGUE WHITELIST        ║
 ║──────────────────────────────────────────────────────────────║
-║  Fixes vs v5.2:                                              ║
+║  Fixes vs v5.3 :                                            ║
 ║  [F17] URL FootyStats corrigée :                             ║
 ║         ❌ https://api.footystats.org/v2                     ║
 ║         ✅ https://api.football-data-api.com                 ║
@@ -41,7 +41,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.3 — FOOTYSTATS FIXED EDITION")
+log.info("🚀 APEX-SIRIUS v5.4 — EXPANDED LEAGUE WHITELIST")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -93,24 +93,71 @@ FS_BASE  = "https://api.football-data-api.com"
 # ====================== GATE-0 : WHITELIST ======================
 # API-Sports league_id → (tier, nom lisible)
 LEAGUE_WHITELIST = {
+    # ══════════════════════════════════════════════
+    # P0 — Compétitions UEFA / AFC continentales
+    # ══════════════════════════════════════════════
     2:   ("P0", "UEFA Champions League"),
     3:   ("P0", "UEFA Europa League"),
-    848: ("P0", "UEFA Conference League"),
+    848: ("P0", "UEFA Europa Conference League"),
+    17:  ("P0", "AFC Champions League"),
+
+    # ══════════════════════════════════════════════
+    # N1 — Top 5 Européens
+    # ══════════════════════════════════════════════
     39:  ("N1", "Premier League"),
     140: ("N1", "La Liga"),
     78:  ("N1", "Bundesliga"),
     135: ("N1", "Serie A"),
     61:  ("N1", "Ligue 1"),
-    94:  ("N2", "Primeira Liga"),
+
+    # ══════════════════════════════════════════════
+    # N2 — Ligues fortes Europe + Grandes Amériques/Asie
+    # ══════════════════════════════════════════════
+    40:  ("N2", "Championship"),
+    62:  ("N2", "Ligue 2"),
+    79:  ("N2", "2. Bundesliga"),
+    136: ("N2", "Serie B"),
     88:  ("N2", "Eredivisie"),
     144: ("N2", "Pro League Belgique"),
+    94:  ("N2", "Primeira Liga"),
     203: ("N2", "Süper Lig"),
-    119: ("N2", "Superliga Danemark"),
-    113: ("N2", "Allsvenskan"),
-    71:  ("N3", "Série A Brésil"),
-    128: ("N3", "Liga Profesional Argentine"),
-    188: ("N3", "MLS"),
-    253: ("N3", "Saudi Pro League"),
+    179: ("N2", "Scottish Premiership"),
+    235: ("N2", "Russian Premier League"),
+    71:  ("N2", "Série A Brésil"),
+    128: ("N2", "Primera División Argentine"),
+    262: ("N2", "Liga MX"),
+    253: ("N2", "MLS"),
+    98:  ("N2", "J1 League"),
+    292: ("N2", "K League 1"),
+    307: ("N2", "Saudi Professional League"),
+    188: ("N2", "A-League Australie"),
+
+    # ══════════════════════════════════════════════
+    # N3 — Ligues surveillées
+    # ══════════════════════════════════════════════
+    41:  ("N3", "EFL League One"),
+    89:  ("N3", "Eerste Divisie"),
+    113: ("N3", "Allsvenskan"),
+    119: ("N3", "Superliga Danemark"),
+    103: ("N3", "Eliteserien Norvège"),
+    106: ("N3", "Ekstraklasa Pologne"),
+    95:  ("N3", "LigaPro Portugal"),
+    218: ("N3", "Bundesliga Autriche"),
+    207: ("N3", "Super League Suisse"),
+    197: ("N3", "Super League Grèce"),
+    283: ("N3", "Liga I Roumanie"),
+    271: ("N3", "NB I Hongrie"),
+    210: ("N3", "Prva HNL Croatie"),
+    333: ("N3", "Ukrainian Premier League"),
+    382: ("N3", "Israeli Premier League"),
+    169: ("N3", "Chinese Super League"),
+    200: ("N3", "Botola Pro Maroc"),
+    233: ("N3", "Egyptian Premier League"),
+    265: ("N3", "Primera División Chili"),
+    239: ("N3", "Categoria Primera A Colombie"),
+    244: ("N3", "Veikkausliiga Finlande"),
+    164: ("N3", "Úrvalsdeild Islande"),
+    384: ("N3", "Ivory Coast Ligue 1"),
 }
 
 def get_league_info(league_id: int) ->object:
@@ -510,7 +557,7 @@ def get_stats(tid: int, lid: int, season: int) ->object:
 
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"⏰ v5.3 — Cycle {datetime.now().strftime('%H:%M')}")
+    log.info(f"⏰ v5.4 — Cycle {datetime.now().strftime('%H:%M')}")
 
     # [F21] Pre-fetch FootyStats UNE SEULE FOIS pour tout le cycle
     fs_index = build_fs_index()
