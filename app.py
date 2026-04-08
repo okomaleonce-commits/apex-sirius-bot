@@ -289,6 +289,66 @@ def fetch_oa_events_cycle():
     return _fetch_oa_events()
 
 
+# ====================== GATE-0 : WHITELIST 50 LIGUES ======================
+LEAGUE_WHITELIST = {
+    # P0
+    2:   ("P0", "UEFA Champions League"),
+    3:   ("P0", "UEFA Europa League"),
+    848: ("P0", "UEFA Europa Conference League"),
+    17:  ("P0", "AFC Champions League"),
+    # N1
+    39:  ("N1", "Premier League"),
+    140: ("N1", "La Liga"),
+    78:  ("N1", "Bundesliga"),
+    135: ("N1", "Serie A"),
+    61:  ("N1", "Ligue 1"),
+    # N2
+    40:  ("N2", "Championship"),
+    62:  ("N2", "Ligue 2"),
+    79:  ("N2", "2. Bundesliga"),
+    136: ("N2", "Serie B"),
+    88:  ("N2", "Eredivisie"),
+    144: ("N2", "Pro League Belgique"),
+    94:  ("N2", "Primeira Liga"),
+    203: ("N2", "Super Lig"),
+    179: ("N2", "Scottish Premiership"),
+    235: ("N2", "Russian Premier League"),
+    71:  ("N2", "Serie A Bresil"),
+    128: ("N2", "Primera Division Argentine"),
+    262: ("N2", "Liga MX"),
+    253: ("N2", "MLS"),
+    98:  ("N2", "J1 League"),
+    292: ("N2", "K League 1"),
+    307: ("N2", "Saudi Professional League"),
+    188: ("N2", "A-League Australie"),
+    # N3
+    41:  ("N3", "EFL League One"),
+    89:  ("N3", "Eerste Divisie"),
+    113: ("N3", "Allsvenskan"),
+    119: ("N3", "Superliga Danemark"),
+    103: ("N3", "Eliteserien Norvege"),
+    106: ("N3", "Ekstraklasa Pologne"),
+    95:  ("N3", "LigaPro Portugal"),
+    218: ("N3", "Bundesliga Autriche"),
+    207: ("N3", "Super League Suisse"),
+    197: ("N3", "Super League Grece"),
+    283: ("N3", "Liga I Roumanie"),
+    271: ("N3", "NB I Hongrie"),
+    210: ("N3", "Prva HNL Croatie"),
+    333: ("N3", "Ukrainian Premier League"),
+    382: ("N3", "Israeli Premier League"),
+    169: ("N3", "Chinese Super League"),
+    200: ("N3", "Botola Pro Maroc"),
+    233: ("N3", "Egyptian Premier League"),
+    265: ("N3", "Primera Division Chili"),
+    239: ("N3", "Categoria Primera A Colombie"),
+    244: ("N3", "Veikkausliiga Finlande"),
+    164: ("N3", "Urvalsdeild Islande"),
+    384: ("N3", "Ivory Coast Ligue 1"),
+}
+
+TIERS_WITH_ODDS = {"P0", "N1", "N2"}
+
 def get_league_info(league_id):
     return LEAGUE_WHITELIST.get(league_id)
 
