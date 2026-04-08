@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.6 — THE ODDS API INTEGRATION         ║
+║          APEX-SIRIUS v5.7 — ODDS-API.IO INTEGRATION         ║
 ║──────────────────────────────────────────────────────────────║
 ║  Contexte : Les 50 ligues de la whitelist sont activées      ║
 ║  dans le forfait FootyStats de l'utilisateur.                ║
@@ -46,7 +46,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.6 — THE ODDS API INTEGRATION")
+log.info("🚀 APEX-SIRIUS v5.7 — ODDS-API.IO INTEGRATION")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -91,250 +91,203 @@ BASE_URL = "https://v3.football.api-sports.io"
 HEADERS  = {"x-apisports-key": API_KEY} if API_KEY else {}
 FS_BASE  = "https://api.football-data-api.com"
 
-# ====================== THE ODDS API — SOURCE COTES ELARGIE ======================
-# [F29] Couvre 40+ ligues football dont N3 non couvertes par Football API /odds
-# Clé gratuite disponible sur https://the-odds-api.com/
+# ====================== ODDS-API.IO — SOURCE COTES ELARGIE ======================
+# [F29] odds-api.io : 265 bookmakers, 34 sports, format différent de the-odds-api
+# Base URL  : https://api.odds-api.io/v3
+# Auth      : ?apiKey=KEY (pas api_key)
+# Avantage  : /odds/multi → 10 matchs en 1 seule requête
+# Plan free : 2 bookmakers, 100 req/heure
 ODDS_API_KEY  = os.environ.get("ODDS_API_KEY", "")
-ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports"
+ODDS_API_BASE = "https://api.odds-api.io/v3"
 
-# [F32] Suivi quota global — réinitialisé à chaque démarrage
-_odds_quota_remaining = 500
-_odds_quota_used      = 0
+# Bookmakers disponibles selon le plan souscrit
+# Free : 2 bookmakers → choisir les plus couverts
+ODDS_API_BOOKMAKERS = os.environ.get("ODDS_API_BOOKMAKERS", "Bet365,Unibet")
 
-# [F30] Mapping Football API league_id → The Odds API sport_key
-ODDS_API_SPORT_KEYS = {
-    # P0
-    2:   "soccer_uefa_champs_league",
-    3:   "soccer_uefa_europa_league",
-    848: "soccer_uefa_europa_conference_league",
-    17:  "soccer_asia_afc_champions_league",
-    # N1
-    39:  "soccer_epl",
-    140: "soccer_spain_la_liga",
-    78:  "soccer_germany_bundesliga",
-    135: "soccer_italy_serie_a",
-    61:  "soccer_france_ligue_one",
-    # N2
-    40:  "soccer_england_championship",
-    62:  "soccer_france_ligue_two",
-    79:  "soccer_germany_bundesliga2",
-    136: "soccer_italy_serie_b",
-    88:  "soccer_netherlands_eredivisie",
-    144: "soccer_belgium_first_div",
-    94:  "soccer_portugal_primeira_liga",
-    95:  "soccer_portugal_segunda_liga",
-    203: "soccer_turkey_super_league",
-    179: "soccer_scotland_premiership",
-    235: "soccer_russia_premier_league",
-    71:  "soccer_brazil_campeonato",
-    128: "soccer_argentina_primera_division",
-    262: "soccer_mexico_ligamx",
-    253: "soccer_usa_mls",
-    98:  "soccer_japan_j_league",
-    292: "soccer_south_korea_kleague1",
-    188: "soccer_australia_aleague",
-    # N3
-    41:  "soccer_england_league1",
-    89:  "soccer_netherlands_eerste_divisie",
-    113: "soccer_sweden_allsvenskan",
-    119: "soccer_denmark_superliga",
-    103: "soccer_norway_eliteserien",
-    106: "soccer_poland_ekstraklasa",
-    207: "soccer_switzerland_superleague",
-    218: "soccer_austria_bundesliga",
-    197: "soccer_greece_super_league",
-    210: "soccer_croatia_hnl",
-    233: "soccer_egypt_premier_league",
-    200: "soccer_morocco_botola_pro",
-    271: "soccer_hungary_nb_i",
-    265: "soccer_chile_primera_division",
-    239: "soccer_colombia_primera_a",
-    244: "soccer_finland_veikkausliiga",
-    164: "soccer_iceland_premier_league",
-}
+# Cache des events football du jour (1 appel par cycle)
+_oa_events      = []
+_oa_events_ts   = 0.0
+_oa_events_ttl  = 20 * 60   # 20 min
 
-# Cache Odds API par sport_key pour éviter les doubles appels dans un cycle
-_odds_api_cache = {}
-_odds_api_cache_ts = 0.0
-ODDS_API_CACHE_TTL = 20 * 60   # 20 min
+# Cache des odds par eventId
+_oa_odds_cache  = {}
+_oa_odds_ts     = 0.0
+_oa_odds_ttl    = 10 * 60   # 10 min
 
-def _get_odds_api_events(sport_key):
+def _fetch_oa_events():
     """
-    Fetch les events d'un sport_key depuis The Odds API.
-    Résultat mis en cache 20 min pour économiser le quota.
+    Charge tous les events football à venir via /v3/events.
+    1 seul appel par cycle — résultat mis en cache 20 min.
     """
-    global _odds_quota_remaining, _odds_quota_used
-    global _odds_api_cache, _odds_api_cache_ts
+    global _oa_events, _oa_events_ts
 
     now = time.time()
-    # Reset cache toutes les 20 min
-    if now - _odds_api_cache_ts > ODDS_API_CACHE_TTL:
-        _odds_api_cache    = {}
-        _odds_api_cache_ts = now
-
-    if sport_key in _odds_api_cache:
-        return _odds_api_cache[sport_key]
+    if now - _oa_events_ts < _oa_events_ttl and _oa_events:
+        return _oa_events
 
     if not ODDS_API_KEY:
-        return []
-    if _odds_quota_remaining < 10:
-        log.warning(f"Odds API quota critique ({_odds_quota_remaining}) — pause")
         return []
 
     try:
         r = requests.get(
-            f"{ODDS_API_BASE}/{sport_key}/odds",
-            params={
-                "api_key":    ODDS_API_KEY,
-                "regions":    "eu",
-                "markets":    "h2h",
-                "oddsFormat": "decimal",
-                "dateFormat": "iso",
-            },
-            timeout=10
+            f"{ODDS_API_BASE}/events",
+            params={"apiKey": ODDS_API_KEY, "sport": "football"},
+            timeout=12
         )
-
-        # [F32] Mise à jour quota
-        try:
-            _odds_quota_remaining = int(
-                r.headers.get("x-requests-remaining", _odds_quota_remaining))
-            _odds_quota_used = int(
-                r.headers.get("x-requests-used", _odds_quota_used))
-            log.debug(f"Odds API quota : {_odds_quota_remaining} restants / "
-                      f"{_odds_quota_used} utilises")
-        except (ValueError, TypeError):
-            pass
-
         if r.status_code != 200:
-            log.warning(f"Odds API HTTP {r.status_code} [{sport_key}]")
-            _odds_api_cache[sport_key] = []
-            return []
+            log.warning(f"odds-api.io /events HTTP {r.status_code}")
+            return _oa_events
 
-        events = r.json()
-        _odds_api_cache[sport_key] = events
-        log.debug(f"Odds API [{sport_key}] : {len(events)} events")
-        return events
+        data = r.json()
+        events = data if isinstance(data, list) else data.get("data", [])
+        _oa_events    = events
+        _oa_events_ts = now
+        log.info(f"odds-api.io events : {len(events)} matchs football")
+        return _oa_events
 
     except Exception as e:
-        log.warning(f"_get_odds_api_events({sport_key}) : {e}")
+        log.warning(f"_fetch_oa_events : {e}")
+        return _oa_events
+
+def _find_oa_event(h_name, a_name, events):
+    """
+    [F27] Trouve l'event odds-api.io correspondant au match.
+    Matching fuzzy sur home/away team names.
+    """
+    for ev in events:
+        eh = ev.get("home", "") or ev.get("home_team", "") or ev.get("homeTeam", "")
+        ea = ev.get("away", "") or ev.get("away_team", "") or ev.get("awayTeam", "")
+        if fuzzy(h_name, eh) and fuzzy(a_name, ea):
+            return ev
+    return None
+
+def _fetch_oa_odds_batch(event_ids):
+    """
+    [F31] /odds/multi — 10 events en 1 requête.
+    Retourne {event_id: odds_dict}.
+    """
+    global _oa_odds_cache, _oa_odds_ts
+
+    now = time.time()
+    if now - _oa_odds_ts > _oa_odds_ttl:
+        _oa_odds_cache = {}
+        _oa_odds_ts    = now
+
+    # Filtrer ceux qui ne sont pas en cache
+    missing = [eid for eid in event_ids if eid not in _oa_odds_cache]
+    if not missing or not ODDS_API_KEY:
+        return _oa_odds_cache
+
+    # Batch par 10 (limite /multi)
+    for i in range(0, len(missing), 10):
+        batch = missing[i:i+10]
+        try:
+            r = requests.get(
+                f"{ODDS_API_BASE}/odds/multi",
+                params={
+                    "apiKey":      ODDS_API_KEY,
+                    "eventIds":    ",".join(str(e) for e in batch),
+                    "bookmakers":  ODDS_API_BOOKMAKERS,
+                    "oddsFormat":  "decimal",
+                },
+                timeout=12
+            )
+            if r.status_code != 200:
+                log.warning(f"odds-api.io /odds/multi HTTP {r.status_code}")
+                continue
+
+            results = r.json()
+            if isinstance(results, list):
+                for item in results:
+                    eid = item.get("id")
+                    if eid:
+                        _oa_odds_cache[eid] = item
+            elif isinstance(results, dict):
+                eid = results.get("id")
+                if eid:
+                    _oa_odds_cache[eid] = results
+
+        except Exception as e:
+            log.warning(f"_fetch_oa_odds_batch : {e}")
+
+    return _oa_odds_cache
+
+def _parse_oa_odds_to_football_api(odds_item, h_name, a_name):
+    """
+    [F31] Convertit le format odds-api.io → format Football API /odds.
+    Format odds-api.io :
+    {
+      "bookmakers": {
+        "Bet365": [
+          {"name": "ML", "odds": [{"home": "2.10", "draw": "3.40", "away": "3.20"}]}
+        ]
+      }
+    }
+    → Format Football API : [{"bookmakers": [{"name": bm, "bets": [...]}]}]
+    """
+    if not odds_item:
         return []
 
-def _convert_odds_api_to_football_api(events, h_name, a_name):
-    """
-    [F31] Convertit le format The Odds API → format Football API /odds.
-    Filtre sur le match home/away correspondant.
-    Retourne une liste compatible avec detect_best_value().
-    """
-    for event in events:
-        eh = event.get("home_team", "")
-        ea = event.get("away_team", "")
-        if not (fuzzy(h_name, eh) and fuzzy(a_name, ea)):
-            continue
+    bookmakers_raw = odds_item.get("bookmakers", {})
+    if not bookmakers_raw:
+        return []
 
-        # Match trouvé — construire la structure Football API
-        bookmakers = []
-        for bm in event.get("bookmakers", []):
-            bets = []
-            for market in bm.get("markets", []):
-                if market.get("key") != "h2h":
-                    continue
-                values = []
-                for outcome in market.get("outcomes", []):
-                    oname = outcome.get("name", "")
-                    price = outcome.get("price", 0)
-                    if fuzzy(oname, eh):
-                        side = "Home"
-                    elif fuzzy(oname, ea):
-                        side = "Away"
-                    else:
-                        side = "Draw"
-                    values.append({"value": side, "odd": str(price)})
+    bookmakers_out = []
+    for bm_name, markets in bookmakers_raw.items():
+        bets = []
+        for market in markets:
+            if market.get("name") not in ("ML", "1X2", "Match Result"):
+                continue
+            odds_list = market.get("odds", [])
+            if not odds_list:
+                continue
+            o = odds_list[0]
+            values = []
+            if o.get("home"):
+                values.append({"value": "Home", "odd": str(o["home"])})
+            if o.get("draw"):
+                values.append({"value": "Draw", "odd": str(o["draw"])})
+            if o.get("away"):
+                values.append({"value": "Away", "odd": str(o["away"])})
+            if values:
                 bets.append({"name": "Match Winner", "values": values})
-            if bets:
-                bookmakers.append({"name": bm.get("title", "OddsAPI"),
-                                   "bets": bets})
 
-        if bookmakers:
-            return [{"bookmakers": bookmakers}]
+        if bets:
+            bookmakers_out.append({"name": bm_name, "bets": bets})
 
-    return []
+    return [{"bookmakers": bookmakers_out}] if bookmakers_out else []
+
+# Index pré-fetché pour le cycle courant
+_oa_pending_ids = []   # event_ids à batcher en fin de scan
 
 def get_odds_via_odds_api(league_id, h_name, a_name):
     """
-    [F29] Point d'entrée principal pour The Odds API.
-    Retourne des odds au format Football API ou liste vide.
+    [F29] Point d'entrée principal odds-api.io.
+    Workflow :
+    1. Cherche le match dans _oa_events (chargé une fois par cycle)
+    2. Fetch /odds/multi pour cet event
+    3. Parse et retourne au format Football API
     """
-    sport_key = ODDS_API_SPORT_KEYS.get(league_id)
-    if not sport_key:
+    if not ODDS_API_KEY:
         return []
 
-    events = _get_odds_api_events(sport_key)
-    if not events:
+    events = _oa_events  # déjà chargé par fetch_oa_events_cycle()
+    ev     = _find_oa_event(h_name, a_name, events)
+    if not ev:
         return []
 
-    return _convert_odds_api_to_football_api(events, h_name, a_name)
+    eid        = ev.get("id")
+    odds_cache = _fetch_oa_odds_batch([eid])
+    odds_item  = odds_cache.get(eid)
 
+    return _parse_oa_odds_to_football_api(odds_item, h_name, a_name)
 
+def fetch_oa_events_cycle():
+    """
+    Appel unique par cycle pour pré-charger les events odds-api.io.
+    """
+    return _fetch_oa_events()
 
-# ====================== GATE-0 : WHITELIST 50 LIGUES ======================
-# [F25] Les 50 ligues correspondent exactement au forfait FootyStats.
-# Football API league_id → (tier, nom lisible)
-LEAGUE_WHITELIST = {
-    # P0 — UEFA / AFC
-    2:   ("P0", "UEFA Champions League"),
-    3:   ("P0", "UEFA Europa League"),
-    848: ("P0", "UEFA Europa Conference League"),
-    17:  ("P0", "AFC Champions League"),
-    # N1 — Top 5
-    39:  ("N1", "Premier League"),
-    140: ("N1", "La Liga"),
-    78:  ("N1", "Bundesliga"),
-    135: ("N1", "Serie A"),
-    61:  ("N1", "Ligue 1"),
-    # N2 — Ligues fortes
-    40:  ("N2", "Championship"),
-    62:  ("N2", "Ligue 2"),
-    79:  ("N2", "2. Bundesliga"),
-    136: ("N2", "Serie B"),
-    88:  ("N2", "Eredivisie"),
-    144: ("N2", "Pro League Belgique"),
-    94:  ("N2", "Primeira Liga"),
-    203: ("N2", "Super Lig"),
-    179: ("N2", "Scottish Premiership"),
-    235: ("N2", "Russian Premier League"),
-    71:  ("N2", "Serie A Bresil"),
-    128: ("N2", "Primera Division Argentine"),
-    262: ("N2", "Liga MX"),
-    253: ("N2", "MLS"),
-    98:  ("N2", "J1 League"),
-    292: ("N2", "K League 1"),
-    307: ("N2", "Saudi Professional League"),
-    188: ("N2", "A-League Australie"),
-    # N3 — Ligues surveillees
-    41:  ("N3", "EFL League One"),
-    89:  ("N3", "Eerste Divisie"),
-    113: ("N3", "Allsvenskan"),
-    119: ("N3", "Superliga Danemark"),
-    103: ("N3", "Eliteserien Norvege"),
-    106: ("N3", "Ekstraklasa Pologne"),
-    95:  ("N3", "LigaPro Portugal"),
-    218: ("N3", "Bundesliga Autriche"),
-    207: ("N3", "Super League Suisse"),
-    197: ("N3", "Super League Grece"),
-    283: ("N3", "Liga I Roumanie"),
-    271: ("N3", "NB I Hongrie"),
-    210: ("N3", "Prva HNL Croatie"),
-    333: ("N3", "Ukrainian Premier League"),
-    382: ("N3", "Israeli Premier League"),
-    169: ("N3", "Chinese Super League"),
-    200: ("N3", "Botola Pro Maroc"),
-    233: ("N3", "Egyptian Premier League"),
-    265: ("N3", "Primera Division Chili"),
-    239: ("N3", "Categoria Primera A Colombie"),
-    244: ("N3", "Veikkausliiga Finlande"),
-    164: ("N3", "Urvalsdeild Islande"),
-    384: ("N3", "Ivory Coast Ligue 1"),
-}
 
 def get_league_info(league_id):
     return LEAGUE_WHITELIST.get(league_id)
@@ -362,7 +315,7 @@ def is_excluded(name):
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
 # ====================== SQLITE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v56.db")
+DB_PATH = os.path.join(DATA_DIR, "apex_v57.db")
 
 def init_db():
     try:
@@ -749,10 +702,16 @@ def get_predictions(fid):
 
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"Cycle v5.6 — {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.7 — {datetime.now().strftime('%H:%M')}")
 
     # [F25] Pre-fetch FootyStats UNE SEULE FOIS
     fs_matches = fetch_fs_todays_matches()
+
+    # Pre-fetch odds-api.io events UNE SEULE FOIS par cycle
+    _oa_events_global = fetch_oa_events_cycle() if ODDS_API_KEY else []
+    oa_ok = len(_oa_events_global) > 0
+    if oa_ok:
+        log.info(f"odds-api.io events : {len(_oa_events_global)} matchs")
     fs_ok      = len(fs_matches) > 0
     log.info(f"FootyStats : {'actif — ' + str(len(fs_matches)) + ' matchs' if fs_ok else 'hors ligne'}")
 
@@ -866,7 +825,7 @@ def check_loop():
                 if mode == "BET":
                     # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.6 — BET\n"
+                        f"🚀 APEX-SIRIUS v5.7 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -888,7 +847,7 @@ def check_loop():
                 else:
                     # [F28] Alerte SIGNAL — pas de cotes
                     msg = (
-                        f"📡 APEX-SIRIUS v5.6 — SIGNAL\n"
+                        f"📡 APEX-SIRIUS v5.7 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
