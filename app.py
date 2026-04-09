@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.9 — HOME BOOST + DEDUP         ║
+║          APEX-SIRIUS v5.10 — FULL BIAS CORRECTION         ║
 ║──────────────────────────────────────────────────────────────║
 ║  Contexte : Les 50 ligues de la whitelist sont activées      ║
 ║  dans le forfait FootyStats de l'utilisateur.                ║
@@ -46,7 +46,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.9 — HOME BOOST + DEDUP")
+log.info("🚀 APEX-SIRIUS v5.10 — FULL BIAS CORRECTION")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -355,6 +355,123 @@ def get_league_info(league_id):
 # Tiers qui ont généralement des cotes bookmakers disponibles
 TIERS_WITH_ODDS = {"P0", "N1", "N2"}
 
+# ====================== [B1] HOME ADVANTAGE COEFFICIENTS ======================
+# Coefficients empiriques avantage domicile par league_id
+# Sources : Dixon & Coles 1997, Pollard 2006, littérature récente 2019-2024
+# Principe : hxg_brut * coefficient → hxg ajusté
+# Note : FootyStats intègre déjà l'avantage domicile dans ses xG moyens
+#        Ces coefficients s'appliquent UNIQUEMENT au fallback goals_proxy
+
+HOME_ADV = {
+    # P0 — UEFA knockout (boost fort, pression tribune, enjeu)
+    2:   1.25,   # UCL knockout
+    3:   1.25,   # UEL knockout
+    848: 1.25,   # UECL knockout
+    17:  1.20,   # AFC CL
+
+    # N1 — Top 5 (coefficients réels bien documentés)
+    39:  1.08,   # Premier League (longues distances → moins d'effet)
+    140: 1.12,   # La Liga
+    78:  1.10,   # Bundesliga
+    135: 1.13,   # Serie A (défensif, pression stades)
+    61:  1.11,   # Ligue 1
+
+    # N2 — Ligues secondaires Europe
+    40:  1.14,   # Championship (stades pleins, atmosphère)
+    62:  1.12,   # Ligue 2
+    79:  1.10,   # 2. Bundesliga
+    136: 1.12,   # Serie B
+    88:  1.09,   # Eredivisie
+    144: 1.10,   # Pro League Belgique
+    94:  1.11,   # Primeira Liga
+    203: 1.14,   # Süper Lig (ambiance hostile)
+    179: 1.12,   # Scottish Prem
+    235: 1.15,   # Russian Premier League
+    71:  1.18,   # Série A Brésil (chaleur, altitude, distances)
+    128: 1.20,   # Argentine (pression tribunes, ambiance)
+    262: 1.10,   # Liga MX
+    253: 1.05,   # MLS (longues distances, turf synthétique)
+    98:  1.08,   # J1 League
+    292: 1.09,   # K League 1
+    307: 1.10,   # Saudi Pro League
+    188: 1.09,   # A-League
+
+    # N3 — Ligues avec fort avantage domicile culturel
+    41:  1.12,   # EFL League One
+    89:  1.09,   # Eerste Divisie
+    113: 1.10,   # Allsvenskan
+    119: 1.10,   # Superliga DK
+    103: 1.11,   # Eliteserien
+    106: 1.12,   # Ekstraklasa
+    95:  1.11,   # LigaPro Portugal
+    218: 1.10,   # Bundesliga Autriche
+    207: 1.09,   # Super League Suisse
+    197: 1.13,   # Super League Grèce
+    283: 1.12,   # Liga I Roumanie
+    271: 1.12,   # NB I Hongrie
+    210: 1.12,   # Prva HNL Croatie
+    333: 1.10,   # Ukrainian Premier League (terrain neutre → réduction)
+    382: 1.11,   # Israeli Premier League
+    169: 1.10,   # Chinese Super League
+    200: 1.20,   # Botola Pro Maroc
+    233: 1.22,   # Egyptian Premier League (stades chauds)
+    265: 1.16,   # Primera División Chili
+    239: 1.18,   # Categoria Primera A Colombie
+    244: 1.09,   # Veikkausliiga Finlande
+    164: 1.10,   # Urvalsdeild Islande
+    384: 1.22,   # Ivory Coast Ligue 1
+}
+
+# ====================== [B4] DRAW RATE COEFFICIENTS ======================
+# DC_RHO standard calibré sur données européennes = -0.13
+# Certaines ligues ont un taux de nuls structurellement plus élevé
+# → rho plus négatif accentue la correction Dixon-Coles sur les 0-0/1-1
+
+DC_RHO_BY_LEAGUE = {
+    # Standard européen
+    39:  -0.13,  140: -0.13,  78:  -0.13,  135: -0.13,  61:  -0.13,
+    # Ligues à fort taux de nuls
+    128: -0.18,  # Argentine (~31% nuls)
+    71:  -0.16,  # Brésil (~28% nuls)
+    233: -0.17,  # Egyptian Premier (~30% nuls)
+    200: -0.19,  # Botola Maroc (~33% nuls)
+    239: -0.16,  # Colombie (~28% nuls)
+    384: -0.18,  # CI Ligue 1 (~30% nuls)
+    307: -0.15,  # Saudi Pro (défensif)
+    292: -0.15,  # K League 1
+    # Ligues open (peu de nuls)
+    253: -0.10,  # MLS (~22% nuls, jeu ouvert)
+    188: -0.10,  # A-League (~21% nuls)
+}
+
+# ====================== [B5] EDGE MINIMUM PAR TIER ======================
+# Ligues liquides (bookmakers très efficients) → edge minimum plus élevé
+# Ligues peu liquides → edge peut être réel même à faible niveau
+
+MIN_EDGE_BY_TIER = {
+    "P0": 0.04,   # UCL/UEL : bookmakers très efficients
+    "N1": 0.04,   # Top 5 : très liquides
+    "N2": 0.03,   # Ligues secondaires : moyennement liquides
+    "N3": 0.02,   # Ligues peu liquides : edge réel plus fréquent
+}
+
+# ====================== [B6] LIGUES AVEC CONTEXTE SPECIAL ======================
+# Ces ligues ont des conditions qui invalident partiellement le modèle
+SPECIAL_CONTEXT = {
+    333: "terrain_neutre",   # Ukraine UPL → pas de vrai home advantage
+    253: "longue_distance",  # MLS → fatigue voyage, moins d'avantage domicile
+}
+
+def get_home_adv(league_id):
+    return HOME_ADV.get(league_id, 1.10)  # 1.10 par défaut
+
+def get_dc_rho(league_id):
+    return DC_RHO_BY_LEAGUE.get(league_id, -0.13)
+
+def get_min_edge(tier):
+    return MIN_EDGE_BY_TIER.get(tier, 0.03)
+
+
 # ====================== SEUILS ======================
 MIN_DCS       = 0.58   # [F26] Unifié — footystats garanti sur 50 ligues
 MIN_EDGE      = 0.03   # Mode A (BET)
@@ -375,7 +492,7 @@ def is_excluded(name):
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
 # ====================== SQLITE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v59.db")
+DB_PATH = os.path.join(DATA_DIR, "apex_v510.db")
 
 def init_db():
     try:
@@ -583,13 +700,15 @@ def tau(x, y, lmb, mu, rho):
     elif x == 1 and y == 1: return 1.0 - rho
     return 1.0
 
-def calculate_probs(hxg, axg):
+def calculate_probs(hxg, axg, league_id=0):
+    # [B4] DC_RHO variable selon la ligue
+    rho   = get_dc_rho(league_id) if league_id else DC_RHO
     probs = {"H": 0.0, "D": 0.0, "A": 0.0}
     hp = [poisson_prob(hxg, i) for i in range(7)]
     ap = [poisson_prob(axg, i) for i in range(7)]
     for h in range(7):
         for a in range(7):
-            t = tau(h, a, hxg, axg, DC_RHO)
+            t = tau(h, a, hxg, axg, rho)
             p = max(hp[h] * ap[a] * t, 0.0)
             if   h > a:  probs["H"] += p
             elif h == a: probs["D"] += p
@@ -629,7 +748,7 @@ def kelly_stake(prob, odd, bankroll):
                      bankroll * MAX_STAKE_PCT), 2)
 
 # ====================== MODE A : VALUE ENGINE (avec cotes) ======================
-def detect_best_value(probs, odds_data, hxg, axg, tier, dcs):
+def detect_best_value(probs, odds_data, hxg, axg, tier, dcs, league_id=0):
     best     = None
     max_edge = 0.0
 
@@ -650,7 +769,9 @@ def detect_best_value(probs, odds_data, hxg, axg, tier, dcs):
                     key        = "H" if side == "Home" else "D" if side == "Draw" else "A"
                     prob_model = probs.get(key, 0.0)
                     edge       = prob_model - (1.0 / odd)
-                    if edge < MIN_EDGE:
+                    # [B5] Edge minimum variable selon la liquidité de la ligue
+                    eff_min_edge = get_min_edge(tier)
+                    if edge < eff_min_edge:
                         continue
                     if key == "D" and edge < 0.08:
                         continue
@@ -838,7 +959,7 @@ def get_stats_smart(tid, league_id, season):
 
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"Cycle v5.9 — {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.10 — {datetime.now().strftime('%H:%M')}")
 
     # [F25] Pre-fetch FootyStats UNE SEULE FOIS
     fs_matches = fetch_fs_todays_matches()
@@ -916,12 +1037,15 @@ def check_loop():
             hxg = max(float(hxg), 0.30)
             axg = max(float(axg), 0.30)
 
-            # [F35] Avantage domicile UEFA knockout (P0)
-            # Historiquement ~65% de victoires home en QF/SF
-            # Le proxy saison entière ne capte pas cet effet
-            if tier == "P0":
-                hxg = round(hxg * 1.25, 3)
-                log.debug(f"  P0 home boost: hxg*1.25={hxg:.2f}")
+            # [B1] Avantage domicile calibré par ligue (goals_proxy uniquement)
+            # FootyStats intègre déjà l'avantage dans ses moyennes
+            if hxg_source == "goals_proxy":
+                coeff = get_home_adv(league_id)
+                # Ukraine UPL : terrain neutre → annuler l'avantage
+                if SPECIAL_CONTEXT.get(league_id) == "terrain_neutre":
+                    coeff = 1.00
+                hxg = round(hxg * coeff, 3)
+                log.debug(f"  HomeAdv lid={league_id} coeff={coeff} → hxg={hxg:.2f}")
 
             # GATE-1 : DCS
             dcs = calculate_dcs(stats_h, stats_a, hxg_source, axg_source)
@@ -930,7 +1054,7 @@ def check_loop():
                 continue
             log.info(f"  ✅ DCS={dcs:.2f} OK [{h_name} vs {a_name}] xG:{hxg:.2f}/{axg:.2f} src:{hxg_source}/{axg_source}")
 
-            probs   = calculate_probs(hxg, axg)
+            probs   = calculate_probs(hxg, axg, league_id)
             fid     = f['fixture']['id']
 
             # [F37] Ne pas envoyer 2x la même alerte pour le même match
@@ -957,7 +1081,7 @@ def check_loop():
             if odds_data:
                 log.info(f"  Odds trouvees [{h_name} vs {a_name}] : {len(odds_data)} bookmakers")
                 result = detect_best_value(
-                    probs, odds_data, hxg, axg, tier, dcs)
+                    probs, odds_data, hxg, axg, tier, dcs, league_id)
                 if result:
                     log.info(f"  Value detectee : {result['side']} edge={result['edge']*100:.1f}%")
                 else:
@@ -982,7 +1106,7 @@ def check_loop():
                 if mode == "BET":
                     # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.9 — BET\n"
+                        f"🚀 APEX-SIRIUS v5.10 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -1004,7 +1128,7 @@ def check_loop():
                 else:
                     # [F28] Alerte SIGNAL — pas de cotes
                     msg = (
-                        f"📡 APEX-SIRIUS v5.9 — SIGNAL\n"
+                        f"📡 APEX-SIRIUS v5.10 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
