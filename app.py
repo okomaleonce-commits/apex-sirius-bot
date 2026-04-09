@@ -357,9 +357,9 @@ TIERS_WITH_ODDS = {"P0", "N1", "N2"}
 
 # ====================== SEUILS ======================
 MIN_DCS       = 0.58   # [F26] Unifié — footystats garanti sur 50 ligues
-MIN_EDGE      = 0.05   # Mode A (BET)
-MIN_CONF      = 25     # Mode A + B
-MIN_SIGNAL_P  = 0.55   # Mode B (SIGNAL) — probabilité minimum FootyStats
+MIN_EDGE      = 0.03   # Mode A (BET)
+MIN_CONF      = 15     # Mode A + B
+MIN_SIGNAL_P  = 0.50   # Mode B (SIGNAL) — probabilité minimum FootyStats
 
 # ====================== EXCLUSION ======================
 EXCLUSION_KEYWORDS = [
@@ -612,7 +612,7 @@ def calculate_confidence(hxg, axg, tier, edge, dcs):
     elif edge > 0.05: score += 4
     if dcs >= 0.80:   score += 8
     elif dcs >= 0.65: score += 5
-    elif dcs >= 0.62: score += 2
+    elif dcs >= 0.58: score += 3
     return min(score, 50)
 
 # ====================== KELLY ======================
