@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.8 — UEFA STATS FIX         ║
+║          APEX-SIRIUS v5.9 — HOME BOOST + DEDUP         ║
 ║──────────────────────────────────────────────────────────────║
 ║  Contexte : Les 50 ligues de la whitelist sont activées      ║
 ║  dans le forfait FootyStats de l'utilisateur.                ║
@@ -46,7 +46,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.8 — UEFA STATS FIX")
+log.info("🚀 APEX-SIRIUS v5.9 — HOME BOOST + DEDUP")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -375,7 +375,7 @@ def is_excluded(name):
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
 # ====================== SQLITE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v58.db")
+DB_PATH = os.path.join(DATA_DIR, "apex_v59.db")
 
 def init_db():
     try:
@@ -656,6 +656,11 @@ def detect_best_value(probs, odds_data, hxg, axg, tier, dcs):
                         continue
                     if key == "A" and prob_model < 0.30:
                         continue
+                    # [F36] Moratorium Away haute cote P0 knockout UEFA
+                    if key == "A" and odd > 4.50 and tier == "P0":
+                        continue
+                    if key == "A" and tier == "P0" and prob_model < 0.35:
+                        continue
                     if key == "H" and prob_model < 0.35 and odd < 1.60:
                         continue
                     conf = calculate_confidence(hxg, axg, tier, edge, dcs)
@@ -833,7 +838,7 @@ def get_stats_smart(tid, league_id, season):
 
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"Cycle v5.8 — {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.9 — {datetime.now().strftime('%H:%M')}")
 
     # [F25] Pre-fetch FootyStats UNE SEULE FOIS
     fs_matches = fetch_fs_todays_matches()
@@ -850,6 +855,7 @@ def check_loop():
     now      = datetime.now(timezone.utc)
     bank     = get_bankroll()
     sent     = 0
+    sent_fixtures = set()  # [F37] Déduplication par fixture_id
 
     for f in fixtures:
         try:
@@ -910,6 +916,13 @@ def check_loop():
             hxg = max(float(hxg), 0.30)
             axg = max(float(axg), 0.30)
 
+            # [F35] Avantage domicile UEFA knockout (P0)
+            # Historiquement ~65% de victoires home en QF/SF
+            # Le proxy saison entière ne capte pas cet effet
+            if tier == "P0":
+                hxg = round(hxg * 1.25, 3)
+                log.debug(f"  P0 home boost: hxg*1.25={hxg:.2f}")
+
             # GATE-1 : DCS
             dcs = calculate_dcs(stats_h, stats_a, hxg_source, axg_source)
             if dcs < MIN_DCS:
@@ -919,6 +932,11 @@ def check_loop():
 
             probs   = calculate_probs(hxg, axg)
             fid     = f['fixture']['id']
+
+            # [F37] Ne pas envoyer 2x la même alerte pour le même match
+            if fid in sent_fixtures:
+                continue
+
             result  = None
 
             # ── PIPELINE COTES 3 NIVEAUX ─────────────────────────────
@@ -964,7 +982,7 @@ def check_loop():
                 if mode == "BET":
                     # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.8 — BET\n"
+                        f"🚀 APEX-SIRIUS v5.9 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -986,7 +1004,7 @@ def check_loop():
                 else:
                     # [F28] Alerte SIGNAL — pas de cotes
                     msg = (
-                        f"📡 APEX-SIRIUS v5.8 — SIGNAL\n"
+                        f"📡 APEX-SIRIUS v5.9 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -1033,6 +1051,7 @@ def check_loop():
                             "conf":       result['conf'],
                             "stake":      stake,
                         })
+                        sent_fixtures.add(fid)   # [F37]
                         sent += 1
                     except Exception as e:
                         log.error(f"send_message : {e}")
