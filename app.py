@@ -915,6 +915,7 @@ def check_loop():
             if dcs < MIN_DCS:
                 log.info(f"  DCS={dcs:.2f} trop bas [{h_name} vs {a_name}]")
                 continue
+            log.info(f"  ✅ DCS={dcs:.2f} OK [{h_name} vs {a_name}] xG:{hxg:.2f}/{axg:.2f} src:{hxg_source}/{axg_source}")
 
             probs   = calculate_probs(hxg, axg)
             fid     = f['fixture']['id']
@@ -936,8 +937,15 @@ def check_loop():
 
             # Tentative BET si cotes disponibles
             if odds_data:
+                log.info(f"  Odds trouvees [{h_name} vs {a_name}] : {len(odds_data)} bookmakers")
                 result = detect_best_value(
                     probs, odds_data, hxg, axg, tier, dcs)
+                if result:
+                    log.info(f"  Value detectee : {result['side']} edge={result['edge']*100:.1f}%")
+                else:
+                    log.info(f"  Aucune value (edge<{MIN_EDGE*100:.0f}% ou conf<{MIN_CONF})")
+            else:
+                log.info(f"  Aucune cote [{h_name} vs {a_name}] → Mode SIGNAL")
 
             # [F33] Niveau 3 : /predictions → Mode SIGNAL (dernier recours)
             if result is None:
