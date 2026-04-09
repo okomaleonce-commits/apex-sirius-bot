@@ -356,7 +356,7 @@ def get_league_info(league_id):
 TIERS_WITH_ODDS = {"P0", "N1", "N2"}
 
 # ====================== SEUILS ======================
-MIN_DCS       = 0.62   # [F26] Unifié — footystats garanti sur 50 ligues
+MIN_DCS       = 0.58   # [F26] Unifié — footystats garanti sur 50 ligues
 MIN_EDGE      = 0.05   # Mode A (BET)
 MIN_CONF      = 25     # Mode A + B
 MIN_SIGNAL_P  = 0.55   # Mode B (SIGNAL) — probabilité minimum FootyStats
