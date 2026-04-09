@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.7 — ODDS-API.IO INTEGRATION         ║
+║          APEX-SIRIUS v5.8 — UEFA STATS FIX         ║
 ║──────────────────────────────────────────────────────────────║
 ║  Contexte : Les 50 ligues de la whitelist sont activées      ║
 ║  dans le forfait FootyStats de l'utilisateur.                ║
@@ -46,7 +46,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.7 — ODDS-API.IO INTEGRATION")
+log.info("🚀 APEX-SIRIUS v5.8 — UEFA STATS FIX")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -375,7 +375,7 @@ def is_excluded(name):
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
 # ====================== SQLITE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v57.db")
+DB_PATH = os.path.join(DATA_DIR, "apex_v58.db")
 
 def init_db():
     try:
@@ -760,9 +760,80 @@ def get_predictions(fid):
     resp = d.get('response', []) if d else []
     return resp[0] if resp else None
 
+# ====================== [FIX-UEFA] STATS FALLBACK ======================
+# Les compétitions UEFA (UCL, UEL, UECL) n'ont pas de stats dans
+# Football API sous leur propre league_id. Les stats sont stockées
+# sous la ligue domestique de chaque équipe.
+# Ce mapping donne la ligue domestique principale par équipe connue.
+# Pour les équipes inconnues : on cherche via /teams?id=X
+
+# Ligue domestique par league_id UEFA → liste de league_ids domestiques à essayer
+UEFA_LEAGUE_IDS = {2, 3, 848, 17}   # UCL, UEL, UECL, AFC CL
+
+def get_stats_smart(tid, league_id, season):
+    """
+    [FIX-UEFA] Récupère les stats en cherchant dans :
+    1. La ligue de la compétition (ex: UEL league_id=3)
+    2. Si vide et compétition UEFA → chercher dans la ligue domestique
+       via /teams?id={tid} pour trouver la ligue actuelle
+    3. Fallback sur les top5 domestic leagues si toujours vide
+    """
+    # Tentative directe d'abord
+    stats = get_stats(tid, league_id, season)
+    if stats:
+        return stats
+
+    # Si pas de compétition UEFA → pas de fallback
+    if league_id not in UEFA_LEAGUE_IDS:
+        return None
+
+    # [FIX] Chercher la ligue domestique via /teams
+    try:
+        d = safe_get(f"{BASE_URL}/teams", {"id": tid})
+        if d:
+            response = d.get('response', [])
+            if response:
+                country = response[0].get('team', {}).get('country', '')
+                # Mapper pays → league_id domestique prioritaire
+                country_to_league = {
+                    'England':     39,
+                    'Spain':       140,
+                    'Germany':     78,
+                    'Italy':       135,
+                    'France':      61,
+                    'Portugal':    94,
+                    'Netherlands': 88,
+                    'Belgium':     144,
+                    'Scotland':    179,
+                    'Turkey':      203,
+                    'Russia':      235,
+                    'Ukraine':     333,
+                }
+                domestic_lid = country_to_league.get(country)
+                if domestic_lid:
+                    stats = get_stats(tid, domestic_lid, season)
+                    if stats:
+                        log.debug(f"  Stats fallback [{country} → lid={domestic_lid}]")
+                        return stats
+    except Exception as e:
+        log.debug(f"get_stats_smart fallback : {e}")
+
+    # Dernier recours : essayer les top5 un par un
+    for fallback_lid in [39, 140, 78, 135, 61, 94, 88, 203]:
+        if fallback_lid == league_id:
+            continue
+        stats = get_stats(tid, fallback_lid, season)
+        if stats:
+            log.debug(f"  Stats brute-force lid={fallback_lid} pour team {tid}")
+            return stats
+
+    return None
+
+
+
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"Cycle v5.7 — {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.8 — {datetime.now().strftime('%H:%M')}")
 
     # [F25] Pre-fetch FootyStats UNE SEULE FOIS
     fs_matches = fetch_fs_todays_matches()
@@ -805,8 +876,8 @@ def check_loop():
 
             # Stats API-Football
             season  = f['league']['season']
-            stats_h = get_stats(f['teams']['home']['id'], league_id, season)
-            stats_a = get_stats(f['teams']['away']['id'], league_id, season)
+            stats_h = get_stats_smart(f['teams']['home']['id'], league_id, season)
+            stats_a = get_stats_smart(f['teams']['away']['id'], league_id, season)
             if not stats_h or not stats_a:
                 continue
 
@@ -885,7 +956,7 @@ def check_loop():
                 if mode == "BET":
                     # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.7 — BET\n"
+                        f"🚀 APEX-SIRIUS v5.8 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -907,7 +978,7 @@ def check_loop():
                 else:
                     # [F28] Alerte SIGNAL — pas de cotes
                     msg = (
-                        f"📡 APEX-SIRIUS v5.7 — SIGNAL\n"
+                        f"📡 APEX-SIRIUS v5.8 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
