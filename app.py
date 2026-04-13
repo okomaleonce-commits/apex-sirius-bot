@@ -786,6 +786,9 @@ def detect_best_value(probs, odds_data, hxg, axg, tier, dcs, league_id=0):
                         continue
                     if key == "D" and edge < 0.08:
                         continue
+                    # [F38] Draw bloqué si ecart xG > 1.0 (asymetrie forte = Draw impossible)
+                    if key == "D" and abs(hxg - axg) > 1.0:
+                        continue
                     if key == "A" and prob_model < 0.30:
                         continue
                     # [F36] Moratorium Away haute cote P0 knockout UEFA
@@ -794,6 +797,9 @@ def detect_best_value(probs, odds_data, hxg, axg, tier, dcs, league_id=0):
                     if key == "A" and tier == "P0" and prob_model < 0.35:
                         continue
                     if key == "H" and prob_model < 0.35 and odd < 1.60:
+                        continue
+                    # [F39] Home incoherent si axg > hxg*1.05 apres tous boosters
+                    if key == "H" and axg > hxg * 1.05:
                         continue
                     conf = calculate_confidence(hxg, axg, tier, edge, dcs)
                     if conf < MIN_CONF:
