@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.11 — FORM FILTER + SIGNAL UPGRADE         ║
+║          APEX-SIRIUS v5.12 — DRAW FILTER + EDGE CAP + HOME COHERENCE         ║
 ║──────────────────────────────────────────────────────────────║
 ║  Contexte : Les 50 ligues de la whitelist sont activées      ║
 ║  dans le forfait FootyStats de l'utilisateur.                ║
@@ -46,7 +46,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.11 — FORM FILTER + SIGNAL UPGRADE")
+log.info("🚀 APEX-SIRIUS v5.12 — DRAW FILTER + EDGE CAP + HOME COHERENCE")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -492,7 +492,7 @@ def is_excluded(name):
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
 # ====================== SQLITE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v511.db")
+DB_PATH = os.path.join(DATA_DIR, "apex_v512.db")
 
 def init_db():
     try:
@@ -779,6 +779,11 @@ def detect_best_value(probs, odds_data, hxg, axg, tier, dcs, league_id=0):
                     eff_min_edge = get_min_edge(tier)
                     if edge < eff_min_edge:
                         continue
+                    # [F40] Plafond edge : >20% sur N1/N2 = erreur modèle
+                    # Les marchés liquides sont efficients → edge > 20% = hallucination
+                    if edge > 0.20 and tier in ("N1", "N2"):
+                        log.debug(f"  Edge trop élevé [{edge*100:.0f}%] sur {tier} → bloqué")
+                        continue
                     if key == "D" and edge < 0.08:
                         continue
                     if key == "A" and prob_model < 0.30:
@@ -965,7 +970,7 @@ def get_stats_smart(tid, league_id, season):
 
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"Cycle v5.11 — {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.12 — {datetime.now().strftime('%H:%M')}")
 
     # [F25] Pre-fetch FootyStats UNE SEULE FOIS
     fs_matches = fetch_fs_todays_matches()
@@ -1123,7 +1128,7 @@ def check_loop():
                 if mode == "BET":
                     # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.11 — BET\n"
+                        f"🚀 APEX-SIRIUS v5.12 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -1147,7 +1152,7 @@ def check_loop():
                     # Cote "juste" estimée par le modèle
                     fair_odd = round(1.0 / result["prob"], 2) if result["prob"] > 0 else 0
                     msg = (
-                        f"📡 APEX-SIRIUS v5.11 — SIGNAL\n"
+                        f"📡 APEX-SIRIUS v5.12 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
