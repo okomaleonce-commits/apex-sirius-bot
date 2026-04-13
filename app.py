@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════╗
-║          APEX-SIRIUS v5.10 — FULL BIAS CORRECTION         ║
+║          APEX-SIRIUS v5.11 — FORM FILTER + SIGNAL UPGRADE         ║
 ║──────────────────────────────────────────────────────────────║
 ║  Contexte : Les 50 ligues de la whitelist sont activées      ║
 ║  dans le forfait FootyStats de l'utilisateur.                ║
@@ -46,7 +46,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 log = logging.getLogger("APEX")
-log.info("🚀 APEX-SIRIUS v5.10 — FULL BIAS CORRECTION")
+log.info("🚀 APEX-SIRIUS v5.11 — FORM FILTER + SIGNAL UPGRADE")
 
 # ====================== FLASK ======================
 app = Flask(__name__)
@@ -492,7 +492,7 @@ def is_excluded(name):
     return any(kw in n for kw in EXCLUSION_KEYWORDS)
 
 # ====================== SQLITE ======================
-DB_PATH = os.path.join(DATA_DIR, "apex_v510.db")
+DB_PATH = os.path.join(DATA_DIR, "apex_v511.db")
 
 def init_db():
     try:
@@ -658,12 +658,18 @@ def calculate_dcs(stats_h, stats_a, hxg_source, axg_source):
     score = 0.0
 
     try:
-        h_p = stats_h['fixtures']['played']['total']
-        a_p = stats_a['fixtures']['played']['total']
-        mp  = min(h_p, a_p)
+        h_p  = stats_h['fixtures']['played']['total']
+        a_p  = stats_a['fixtures']['played']['total']
+        h_w  = stats_h['fixtures']['wins']['total']
+        a_w  = stats_a['fixtures']['wins']['total']
+        mp   = min(h_p, a_p)
         if mp >= 10:   score += 0.40
         elif mp >= 6:  score += 0.25
         elif mp >= 3:  score += 0.10
+        # Bonus fiabilité si les deux équipes ont des stats cohérentes (>5 matchs joués)
+        # Malus si l'une des équipes a un historique trop court
+        if h_p < 5 or a_p < 5:
+            score *= 0.75
     except (KeyError, TypeError):
         pass
 
@@ -959,7 +965,7 @@ def get_stats_smart(tid, league_id, season):
 
 # ====================== CHECK LOOP ======================
 def check_loop():
-    log.info(f"Cycle v5.10 — {datetime.now().strftime('%H:%M')}")
+    log.info(f"Cycle v5.11 — {datetime.now().strftime('%H:%M')}")
 
     # [F25] Pre-fetch FootyStats UNE SEULE FOIS
     fs_matches = fetch_fs_todays_matches()
@@ -1044,6 +1050,17 @@ def check_loop():
                 # Ukraine UPL : terrain neutre → annuler l'avantage
                 if SPECIAL_CONTEXT.get(league_id) == "terrain_neutre":
                     coeff = 1.00
+                # [B7] Malus forme : si équipe à domicile < 15% win rate
+                # → home boost réduit (éviter de sur-booster équipes en crise)
+                try:
+                    h_p_total = stats_h['fixtures']['played']['total']
+                    h_w_total = stats_h['fixtures']['wins']['total']
+                    home_win_rate = h_w_total / h_p_total if h_p_total > 5 else 0.3
+                    if home_win_rate < 0.15:
+                        coeff = max(coeff * 0.85, 1.00)
+                        log.debug(f"  Forme malus home: win_rate={home_win_rate:.0%} → coeff réduit={coeff:.2f}")
+                except (KeyError, TypeError, ZeroDivisionError):
+                    pass
                 hxg = round(hxg * coeff, 3)
                 log.debug(f"  HomeAdv lid={league_id} coeff={coeff} → hxg={hxg:.2f}")
 
@@ -1106,7 +1123,7 @@ def check_loop():
                 if mode == "BET":
                     # [F28] Alerte BET complète
                     msg = (
-                        f"🚀 APEX-SIRIUS v5.10 — BET\n"
+                        f"🚀 APEX-SIRIUS v5.11 — BET\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
@@ -1127,19 +1144,21 @@ def check_loop():
                     )
                 else:
                     # [F28] Alerte SIGNAL — pas de cotes
+                    # Cote "juste" estimée par le modèle
+                    fair_odd = round(1.0 / result["prob"], 2) if result["prob"] > 0 else 0
                     msg = (
-                        f"📡 APEX-SIRIUS v5.10 — SIGNAL\n"
+                        f"📡 APEX-SIRIUS v5.11 — SIGNAL\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🏆 {league_name} [{tier}]\n"
                         f"⚽ {h_name} vs {a_name}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"📡 Signal : {result['side']}\n"
-                        f"⚠️ Cotes non disponibles via API\n"
-                        f"  → Verifier manuellement\n"
+                        f"💲 Cote juste modèle : {fair_odd:.2f}\n"
+                        f"⚠️ Vérifier cote bookmaker > {fair_odd:.2f}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
                         f"📊 xG Dom. : {hxg:.2f} {src_h} ({hxg_source})\n"
                         f"📊 xG Ext. : {axg:.2f} {src_a} ({axg_source})\n"
-                        f"💡 P(modele) : {result['prob']*100:.1f}%\n"
+                        f"💡 P(modèle) : {result['prob']*100:.1f}%\n"
                         f"🧠 ML Score : {result['conf']}/50\n"
                         f"🔬 DCS : {dcs:.2f}\n"
                         f"━━━━━━━━━━━━━━━━━━━━━\n"
